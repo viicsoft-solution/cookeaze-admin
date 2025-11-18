@@ -1,0 +1,26 @@
+
+
+
+:root {
+--primary: #2c7be5; /* Replace with exact Figma primary */
+}
+
+
+body { font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial; }
+
+
+header.bg-light { background: linear-gradient(180deg, #fff 0%, #fafafa 100%); }
+
+
+h1.display-5 { letter-spacing: -0.02em; }
+
+
+/* Example utilities to match spacing/rounded corners from Figma */
+.card { border-radius: 16px; }
+.btn-primary { background-color: var(--primary); border-color: var(--primary); }
+
+
+/* Responsive tweaks to mimic Figma layout exactly: adjust as needed */
+@media (min-width: 1200px) {
+.display-5 { font-size: 4rem; }
+}
