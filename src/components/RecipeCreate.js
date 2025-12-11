@@ -17,7 +17,6 @@ const emptyStep = (num) => ({
 
 export default function RecipeCreate() {
   const [name, setName] = useState("");
-  const [categoriesText, setCategoriesText] = useState("");
   const [imageUrl, setImageUrl] = useState("");
   const [description, setDescription] = useState("");
   const [totalTime, setTotalTime] = useState(30);
@@ -65,9 +64,9 @@ export default function RecipeCreate() {
     });
   };
 
-  // Categories state
+  // Categories state - now supports multiple selections
   const [categories, setCategories] = useState([]);
-  const [selectedCategory, setSelectedCategory] = useState("");
+  const [selectedCategories, setSelectedCategories] = useState([]);
 
   // Fetch categories on load
   useEffect(() => {
@@ -89,6 +88,17 @@ export default function RecipeCreate() {
     fetchCategories();
   }, []);
 
+  // Toggle category selection
+  const toggleCategory = (categoryName) => {
+    setSelectedCategories((prev) => {
+      if (prev.includes(categoryName)) {
+        return prev.filter((c) => c !== categoryName);
+      } else {
+        return [...prev, categoryName];
+      }
+    });
+  };
+
   const validate = () => {
     if (!name.trim()) {
       setStatus({ type: "danger", text: "Recipe name is required." });
@@ -98,6 +108,13 @@ export default function RecipeCreate() {
       setStatus({
         type: "danger",
         text: "Image URL is required (public recipes require a valid image).",
+      });
+      return false;
+    }
+    if (selectedCategories.length === 0) {
+      setStatus({
+        type: "danger",
+        text: "Please select at least one category.",
       });
       return false;
     }
@@ -113,8 +130,7 @@ export default function RecipeCreate() {
 
     const payload = {
       name: name.trim(),
-      category: selectedCategory ? [Number(selectedCategory)] : [],
-
+      category: selectedCategories, // Send array of category names (strings)
       image_url: imageUrl.trim(),
       description: description.trim(),
       total_time: Number(totalTime) || 0,
@@ -144,7 +160,7 @@ export default function RecipeCreate() {
       const res = await axiosInstance.post(API_BASE, payload);
       setStatus({ type: "success", text: "Recipe created successfully." });
       setName("");
-      setCategoriesText("");
+      setSelectedCategories([]);
       setImageUrl("");
       setDescription("");
       setTotalTime(30);
@@ -167,11 +183,6 @@ export default function RecipeCreate() {
       setSubmitting(false);
     }
   };
-
-  const previewCategories = categoriesText
-    .split(",")
-    .map((c) => c.trim())
-    .filter(Boolean);
 
   const styles = {
     container: {
@@ -420,7 +431,7 @@ export default function RecipeCreate() {
       display: "flex",
       alignItems: "center",
       gap: "8px",
-      marginTop: "16px",
+      marginTop: "8px",
     },
     checkbox: {
       width: "18px",
@@ -450,6 +461,32 @@ export default function RecipeCreate() {
       borderTop: "2px solid #fff",
       borderRadius: "50%",
       animation: "spin 0.6s linear infinite",
+    },
+    categoryGrid: {
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+      gap: "12px",
+      padding: "16px",
+      backgroundColor: "#fafaf8",
+      borderRadius: "8px",
+      border: "1px solid #e0dcd9",
+      maxHeight: "200px",
+      overflowY: "auto",
+    },
+    categoryCheckboxItem: {
+      display: "flex",
+      alignItems: "center",
+      gap: "8px",
+      padding: "8px",
+      backgroundColor: "#fff",
+      borderRadius: "6px",
+      border: "1px solid #e0dcd9",
+      cursor: "pointer",
+      transition: "all 0.2s ease",
+    },
+    categoryCheckboxItemSelected: {
+      backgroundColor: "#f0ebe5",
+      borderColor: "#d4a574",
     },
   };
 
@@ -518,43 +555,69 @@ export default function RecipeCreate() {
                   />
                 </div>
 
-                <div style={styles.formRow}>
-                  <div style={styles.formGroup}>
-                    <label style={styles.label}>
-                      Category
-                      <span style={styles.required}>*</span>
-                    </label>
-                    <select
-                      style={styles.input}
-                      value={selectedCategory}
-                      onChange={(e) => setSelectedCategory(e.target.value)}
-                    >
-                      <option value="">Select Category</option>
-                      {categories.map((cat) => (
-                        <option key={cat.id} value={cat.id}>
-                          {cat.category_name}
-                        </option>
-                      ))}
-                    </select>
-                    <div style={styles.formHelper}>
-                      Choose one category for this recipe
-                    </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>
+                    Categories
+                    <span style={styles.required}>*</span>
+                  </label>
+                  <div style={styles.categoryGrid}>
+                    {categories.length === 0 ? (
+                      <div
+                        style={{
+                          gridColumn: "1 / -1",
+                          textAlign: "center",
+                          color: "#999",
+                        }}
+                      >
+                        Loading categories...
+                      </div>
+                    ) : (
+                      categories.map((cat) => (
+                        <div
+                          key={cat.id}
+                          style={{
+                            ...styles.categoryCheckboxItem,
+                            ...(selectedCategories.includes(cat.category_name)
+                              ? styles.categoryCheckboxItemSelected
+                              : {}),
+                          }}
+                          onClick={() => toggleCategory(cat.category_name)}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selectedCategories.includes(
+                              cat.category_name
+                            )}
+                            onChange={() => toggleCategory(cat.category_name)}
+                            style={styles.checkbox}
+                            onClick={(e) => e.stopPropagation()}
+                          />
+                          <label style={{ ...styles.checkboxLabel, margin: 0 }}>
+                            {cat.category_name}
+                          </label>
+                        </div>
+                      ))
+                    )}
                   </div>
+                  <div style={styles.formHelper}>
+                    Select one or more categories ({selectedCategories.length}{" "}
+                    selected)
+                  </div>
+                </div>
 
-                  <div style={styles.formGroup}>
-                    <label style={styles.label}>
-                      Image URL
-                      <span style={styles.required}>*</span>
-                    </label>
-                    <input
-                      style={styles.input}
-                      value={imageUrl}
-                      onChange={(e) => setImageUrl(e.target.value)}
-                      placeholder="https://..."
-                    />
-                    <div style={styles.formHelper}>
-                      High-quality images perform better
-                    </div>
+                <div style={styles.formGroup}>
+                  <label style={styles.label}>
+                    Image URL
+                    <span style={styles.required}>*</span>
+                  </label>
+                  <input
+                    style={styles.input}
+                    value={imageUrl}
+                    onChange={(e) => setImageUrl(e.target.value)}
+                    placeholder="https://..."
+                  />
+                  <div style={styles.formHelper}>
+                    High-quality images perform better
                   </div>
                 </div>
               </div>
@@ -846,7 +909,7 @@ export default function RecipeCreate() {
                   }
                   onClick={() => {
                     setName("");
-                    setCategoriesText("");
+                    setSelectedCategories([]);
                     setImageUrl("");
                     setDescription("");
                     setTotalTime(30);
@@ -889,11 +952,23 @@ export default function RecipeCreate() {
             <div style={styles.previewTitle}>{name || "Recipe name"}</div>
 
             <div>
-              {previewCategories.map((c, i) => (
-                <span key={i} style={styles.badge}>
-                  {c}
+              {selectedCategories.length > 0 ? (
+                selectedCategories.map((c, i) => (
+                  <span key={i} style={styles.badge}>
+                    {c}
+                  </span>
+                ))
+              ) : (
+                <span
+                  style={{
+                    ...styles.badge,
+                    backgroundColor: "#e0dcd9",
+                    color: "#999",
+                  }}
+                >
+                  No categories
                 </span>
-              ))}
+              )}
             </div>
 
             <p style={{ fontSize: "13px", color: "#666", lineHeight: "1.6" }}>

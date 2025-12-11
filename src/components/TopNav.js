@@ -57,6 +57,13 @@ export default function TopNav() {
                 Recipes
               </Link>
             </li>
+
+            <li className="nav-item">
+              <Link className="nav-link" to="/notifications">
+                CookEaze Notification
+              </Link>
+            </li>
+
             <li className="nav-item">
               <Link className="nav-link" to="/recipe-theme">
                 Recipe themes dashboard

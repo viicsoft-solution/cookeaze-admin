@@ -8,11 +8,13 @@ import axios from "axios";
  * - filters: search, category, country, min rating (attempted server-side via query params)
  * - client-side filtering fallback
  * - detailed modal with edit/delete and image upload support
+ * - EDITABLE CATEGORIES with multiple selection support
  *
  * Small fix: ensure we send `ingredients_data` and `steps_data` (the API expects those keys).
  */
 
 const API_BASE = "https://api.cookeaze.app/api/recipes/";
+const CATEGORIES_API = "https://api.cookeaze.app/api/categories/";
 
 const RecipeList = () => {
   // list & pagination
@@ -39,6 +41,9 @@ const RecipeList = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
 
+  // categories for editing
+  const [availableCategories, setAvailableCategories] = useState([]);
+
   // image edit
   const [newImageFile, setNewImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
@@ -53,6 +58,21 @@ const RecipeList = () => {
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
     },
   });
+
+  // Fetch available categories
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const res = await axiosInstance.get(CATEGORIES_API);
+        const catArray = res.data?.data || [];
+        setAvailableCategories(catArray);
+      } catch (err) {
+        console.error("Failed to fetch categories:", err);
+        setAvailableCategories([]);
+      }
+    };
+    fetchCategories();
+  }, []);
 
   const buildUrl = (page = 1, size = pageSize) => {
     const params = new URLSearchParams();
@@ -145,6 +165,7 @@ const RecipeList = () => {
       const payload = res.data.data || res.data;
       payload.ingredients = payload.ingredients || [];
       payload.steps = payload.steps || [];
+      payload.category = payload.category || [];
       setDetail(payload);
       setImagePreview(payload.image_url || null);
     } catch (err) {
@@ -163,6 +184,24 @@ const RecipeList = () => {
     setStatusMsg(null);
     setNewImageFile(null);
     setImagePreview(null);
+  };
+
+  // ===== Category toggle =====
+  const toggleCategory = (categoryName) => {
+    setDetail((prev) => {
+      const currentCategories = prev.category || [];
+      if (currentCategories.includes(categoryName)) {
+        return {
+          ...prev,
+          category: currentCategories.filter((c) => c !== categoryName),
+        };
+      } else {
+        return {
+          ...prev,
+          category: [...currentCategories, categoryName],
+        };
+      }
+    });
   };
 
   // ===== Edit helpers =====
@@ -240,6 +279,7 @@ const RecipeList = () => {
         total_time: detail.total_time,
         servings: detail.servings,
         rating: detail.rating,
+        category: detail.category || [], // Include categories
         // include other top-level fields if needed
       };
 
@@ -269,9 +309,13 @@ const RecipeList = () => {
       // If user selected a new image file, send multipart and include JSON strings under the expected keys
       if (newImageFile) {
         const form = new FormData();
-        Object.entries(updateFields).forEach(([k, v]) =>
-          form.append(k, v ?? "")
-        );
+        Object.entries(updateFields).forEach(([k, v]) => {
+          if (k === "category" && Array.isArray(v)) {
+            form.append(k, JSON.stringify(v));
+          } else {
+            form.append(k, v ?? "");
+          }
+        });
         // IMPORTANT: use ingredients_data & steps_data keys (server expects these names)
         form.append("ingredients_data", JSON.stringify(ingredientsData));
         form.append("steps_data", JSON.stringify(stepsData));
@@ -297,6 +341,7 @@ const RecipeList = () => {
       updated.ingredients =
         updated.ingredients || updated.ingredients_data || [];
       updated.steps = updated.steps || updated.steps_data || [];
+      updated.category = updated.category || [];
       setDetail(updated);
       setImagePreview(updated.image_url || null);
       setNewImageFile(null);
@@ -394,6 +439,38 @@ const RecipeList = () => {
 
   return (
     <div className="container py-5">
+      <style>{`
+        .category-checkbox-item {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 8px;
+          background-color: #fff;
+          border-radius: 6px;
+          border: 1px solid #e0dcd9;
+          cursor: pointer;
+          transition: all 0.2s ease;
+        }
+        .category-checkbox-item:hover {
+          background-color: #fafaf8;
+        }
+        .category-checkbox-item.selected {
+          background-color: #f0ebe5;
+          border-color: #d4a574;
+        }
+        .category-grid {
+          display: grid;
+          grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+          gap: 8px;
+          max-height: 200px;
+          overflow-y: auto;
+          padding: 12px;
+          background-color: #fafaf8;
+          border-radius: 8px;
+          border: 1px solid #dee2e6;
+        }
+      `}</style>
+
       {/* Header & Filters */}
       <div className="d-flex align-items-center justify-content-between mb-3 gap-3 flex-column flex-md-row">
         <div>
@@ -639,7 +716,7 @@ const RecipeList = () => {
             aria-modal="true"
           >
             <div
-              className="modal-dialog modal-xl modal-dialog-centered"
+              className="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable"
               role="document"
             >
               <div className="modal-content">
@@ -655,7 +732,10 @@ const RecipeList = () => {
                   ></button>
                 </div>
 
-                <div className="modal-body">
+                <div
+                  className="modal-body"
+                  style={{ maxHeight: "70vh", overflowY: "auto" }}
+                >
                   {detailLoading ? (
                     <div className="text-center py-4">
                       <div
@@ -679,6 +759,85 @@ const RecipeList = () => {
                               }
                               readOnly={!isEditing}
                             />
+                          </div>
+
+                          {/* Category Selection */}
+                          <div className="mb-3">
+                            <label className="form-label small">
+                              Categories{" "}
+                              {isEditing &&
+                                `(${(detail.category || []).length} selected)`}
+                            </label>
+                            {isEditing ? (
+                              <div className="category-grid">
+                                {availableCategories.length === 0 ? (
+                                  <div
+                                    style={{
+                                      gridColumn: "1 / -1",
+                                      textAlign: "center",
+                                      color: "#999",
+                                      fontSize: "14px",
+                                    }}
+                                  >
+                                    Loading categories...
+                                  </div>
+                                ) : (
+                                  availableCategories.map((cat) => (
+                                    <div
+                                      key={cat.id}
+                                      className={`category-checkbox-item ${
+                                        (detail.category || []).includes(
+                                          cat.category_name
+                                        )
+                                          ? "selected"
+                                          : ""
+                                      }`}
+                                      onClick={() =>
+                                        toggleCategory(cat.category_name)
+                                      }
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={(
+                                          detail.category || []
+                                        ).includes(cat.category_name)}
+                                        onChange={() =>
+                                          toggleCategory(cat.category_name)
+                                        }
+                                        onClick={(e) => e.stopPropagation()}
+                                        style={{ cursor: "pointer" }}
+                                      />
+                                      <label
+                                        style={{
+                                          cursor: "pointer",
+                                          margin: 0,
+                                          fontSize: "13px",
+                                        }}
+                                      >
+                                        {cat.category_name}
+                                      </label>
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            ) : (
+                              <div>
+                                {(detail.category || []).length > 0 ? (
+                                  (detail.category || []).map((c, i) => (
+                                    <span
+                                      key={i}
+                                      className="badge bg-primary me-1 mb-1"
+                                    >
+                                      {c}
+                                    </span>
+                                  ))
+                                ) : (
+                                  <span className="text-muted small">
+                                    No categories
+                                  </span>
+                                )}
+                              </div>
+                            )}
                           </div>
 
                           <div className="row g-2">

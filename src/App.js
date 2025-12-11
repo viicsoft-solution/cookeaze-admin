@@ -23,6 +23,7 @@ import RecipeDetail from "./components/RecipeDetail";
 import AdvertsList from "./pages/AdvertsList";
 import AdvertDetail from "./pages/AdvertDetail";
 import AdvertForm from "./pages/AdvertForm";
+import NotificationAdmin from "./pages/Notifications";
 
 // admin & categories
 import AdminDashboard from "./pages/AdminDashboard";
@@ -89,6 +90,16 @@ function AppRoutes() {
               </PrivateRoute>
             }
           />
+
+          <Route
+            path="/notifications"
+            element={
+              <PrivateRoute>
+                <NotificationAdmin />
+              </PrivateRoute>
+            }
+          />
+
           <Route
             path="/recipe/:id"
             element={
