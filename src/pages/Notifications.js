@@ -11,12 +11,13 @@ import {
   Loader,
 } from "lucide-react";
 import "bootstrap/dist/css/bootstrap.min.css";
+import { useAuth } from "../contexts/AuthProvider"; // <-- added
 
 const API_BASE = "https://api.cookeaze.app/api";
-const AUTH_TOKEN =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ0b2tlbl90eXBlIjoiYWNjZXNzIiwiZXhwIjoxNzY4MDM3ODI0LCJpYXQiOjE3NjU0NDU4MjQsImp0aSI6IjQ4MWRlOWYwMzc1ZjQ4MWViZDVjZGM0NjM1YmFjYjEzIiwidXNlcl9pZCI6MX0.1GyVesayieEntPbiT4YUeIFUdweh0yRmbAGsrXjYQ6A";
+// removed const AUTH_TOKEN
 
 const NotificationAdmin = () => {
+  const { token } = useAuth(); // <-- get token from context
   const [activeTab, setActiveTab] = useState("broadcast");
   const [loading, setLoading] = useState(false);
 
@@ -66,31 +67,80 @@ const NotificationAdmin = () => {
     }, 3500);
   };
 
+  // helper to build auth headers and handle missing token
+  const getAuthHeaders = () => {
+    if (!token) return null; // caller should handle null (not authenticated)
+    return {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
+    };
+  };
+
+  // helper to parse different response shapes for recipes
+  const extractRecipes = (data) => {
+    if (!data) return [];
+    if (Array.isArray(data)) return data;
+    if (Array.isArray(data.results)) return data.results;
+    if (Array.isArray(data.data?.results)) return data.data.results;
+    if (Array.isArray(data.data)) return data.data;
+    // fallback: maybe the API returned single object or other structure
+    return [];
+  };
+
   // ----------------------------------------------------------
   // FETCH RECIPES - Only called explicitly
   // ----------------------------------------------------------
   const fetchRecipes = async (searchQuery = "") => {
     setLoadingRecipes(true);
+
+    // ensure we have a token
+    const headers = getAuthHeaders();
+    if (!headers) {
+      setLoadingRecipes(false);
+      showNotification("error", "You are not authenticated. Please log in.");
+      return;
+    }
+
     try {
       const url = searchQuery
         ? `${API_BASE}/recipes/?search=${encodeURIComponent(searchQuery)}`
         : `${API_BASE}/recipes/`;
 
       const res = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${AUTH_TOKEN}`,
-        },
+        headers,
       });
 
+      // if non-2xx, try to show a helpful error
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        console.error("Fetch recipes failed", res.status, text);
+        showNotification(
+          "error",
+          `Failed to fetch recipes (status ${res.status})`
+        );
+        setRecipes([]);
+        return;
+      }
+
       const data = await res.json();
-      if (data.isSuccessful) {
-        setRecipes(data.data.results);
+
+      // extract recipes from possible shapes
+      const extracted = extractRecipes(data);
+
+      if (extracted.length > 0) {
+        setRecipes(extracted);
+      } else {
+        // no recipes found — but still set to empty array so UI shows empty state
+        setRecipes([]);
+        // optionally notify the user only if search was used
+        // showNotification("error", searchQuery ? "No recipes found." : "No recipes available.");
       }
     } catch (err) {
-      showNotification("error", "Failed to fetch recipes");
+      console.error("fetchRecipes error:", err);
+      showNotification("error", "Network error while fetching recipes");
+      setRecipes([]);
     } finally {
       setLoadingRecipes(false);
-      // Refocus the search input after fetching
       if (searchInputRef.current) {
         searchInputRef.current.focus();
       }
@@ -103,6 +153,7 @@ const NotificationAdmin = () => {
       setRecipeSearch(""); // Clear search input
       fetchRecipes(""); // Load all recipes initially
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showRecipeModal]);
 
   // ----------------------------------------------------------
@@ -126,28 +177,38 @@ const NotificationAdmin = () => {
   };
 
   // ----------------------------------------------------------
-  // SUBMIT BROADCAST
+  // SUBMIT helpers: updated to use token from context
   // ----------------------------------------------------------
+  const postWithAuth = async (path, payload) => {
+    const headers = getAuthHeaders();
+    if (!headers) {
+      throw new Error("Not authenticated");
+    }
+
+    const res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+
+    const data = await res.json().catch(() => ({}));
+    return { ok: res.ok, status: res.status, data };
+  };
+
   const handleBroadcastSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setDeliveryStats(null);
 
     try {
-      const res = await fetch(`${API_BASE}/notifications/broadcast/`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${AUTH_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(broadcastForm),
-      });
+      const { ok, data } = await postWithAuth(
+        "/notifications/broadcast/",
+        broadcastForm
+      );
 
-      const data = await res.json();
-
-      if (data.success) {
+      if (ok && (data.success || data.isSuccessful)) {
         showNotification("success", "Broadcast notification sent!");
-        setDeliveryStats(data.data);
+        setDeliveryStats(data.data || data);
         setBroadcastForm({
           title: "",
           body: "",
@@ -155,38 +216,28 @@ const NotificationAdmin = () => {
           custom_data: {},
         });
       } else {
-        showNotification("error", "Failed to send broadcast");
+        console.error("broadcast error", data);
+        showNotification("error", data.message || "Failed to send broadcast");
       }
     } catch (err) {
+      console.error(err);
       showNotification("error", "Network error");
     }
 
     setLoading(false);
   };
 
-  // ----------------------------------------------------------
-  // SUBMIT MEAL
-  // ----------------------------------------------------------
   const handleMealSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setDeliveryStats(null);
 
     try {
-      const res = await fetch(`${API_BASE}/notifications/meal/`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${AUTH_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(mealForm),
-      });
+      const { ok, data } = await postWithAuth("/notifications/meal/", mealForm);
 
-      const data = await res.json();
-
-      if (data.success) {
+      if (ok && (data.success || data.isSuccessful)) {
         showNotification("success", "Meal notification sent!");
-        setDeliveryStats(data.data);
+        setDeliveryStats(data.data || data);
         setMealForm({
           meal_type: "dinner",
           title: "",
@@ -194,18 +245,20 @@ const NotificationAdmin = () => {
           custom_data: {},
         });
       } else {
-        showNotification("error", "Failed to send meal notification");
+        console.error("meal error", data);
+        showNotification(
+          "error",
+          data.message || "Failed to send meal notification"
+        );
       }
     } catch (err) {
+      console.error(err);
       showNotification("error", "Network error");
     }
 
     setLoading(false);
   };
 
-  // ----------------------------------------------------------
-  // SUBMIT RECIPE
-  // ----------------------------------------------------------
   const handleRecipeSubmit = async (e) => {
     e.preventDefault();
 
@@ -218,20 +271,14 @@ const NotificationAdmin = () => {
     setDeliveryStats(null);
 
     try {
-      const res = await fetch(`${API_BASE}/notifications/recipe/`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${AUTH_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(recipeForm),
-      });
+      const { ok, data } = await postWithAuth(
+        "/notifications/recipe/",
+        recipeForm
+      );
 
-      const data = await res.json();
-
-      if (data.success) {
+      if (ok && (data.success || data.isSuccessful)) {
         showNotification("success", "Recipe notification sent!");
-        setDeliveryStats(data.data);
+        setDeliveryStats(data.data || data);
 
         setRecipeForm({
           recipe_id: null,
@@ -243,9 +290,14 @@ const NotificationAdmin = () => {
           custom_data: {},
         });
       } else {
-        showNotification("error", "Failed to send recipe notification");
+        console.error("recipe notif error", data);
+        showNotification(
+          "error",
+          data.message || "Failed to send recipe notification"
+        );
       }
     } catch (err) {
+      console.error(err);
       showNotification("error", "Network error");
     }
 
