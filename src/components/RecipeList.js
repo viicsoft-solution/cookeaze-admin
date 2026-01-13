@@ -48,6 +48,11 @@ const RecipeList = () => {
   const [newImageFile, setNewImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
 
+  // NEW: mode for image editing: 'upload' or 'url'
+  const [imageMode, setImageMode] = useState("upload");
+  // NEW: input state for pasted URL
+  const [imageUrlInput, setImageUrlInput] = useState("");
+
   // misc
   const [statusMsg, setStatusMsg] = useState(null);
   const token = localStorage.getItem("token");
@@ -72,7 +77,7 @@ const RecipeList = () => {
       }
     };
     fetchCategories();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const buildUrl = (page = 1, size = pageSize) => {
     const params = new URLSearchParams();
@@ -159,6 +164,8 @@ const RecipeList = () => {
     setStatusMsg(null);
     setNewImageFile(null);
     setImagePreview(null);
+    setImageMode("upload");
+    setImageUrlInput("");
 
     try {
       const res = await axiosInstance.get(`${API_BASE}${id}/`);
@@ -167,7 +174,13 @@ const RecipeList = () => {
       payload.steps = payload.steps || [];
       payload.category = payload.category || [];
       setDetail(payload);
-      setImagePreview(payload.image_url || null);
+
+      // set preview and URL input appropriately
+      const initialUrl = payload.image_url || null;
+      setImagePreview(initialUrl);
+      setImageUrlInput(initialUrl || "");
+      // if initial image exists, default to URL mode so user can see pasteable URL
+      setImageMode(initialUrl ? "url" : "upload");
     } catch (err) {
       console.error("Error fetching recipe detail", err);
       setStatusMsg({ type: "danger", text: "Failed to load recipe details." });
@@ -184,6 +197,8 @@ const RecipeList = () => {
     setStatusMsg(null);
     setNewImageFile(null);
     setImagePreview(null);
+    setImageMode("upload");
+    setImageUrlInput("");
   };
 
   // ===== Category toggle =====
@@ -262,9 +277,26 @@ const RecipeList = () => {
       return;
     }
     setNewImageFile(file);
+    setImageUrlInput("");
+    setImageMode("upload");
     const reader = new FileReader();
     reader.onload = (e) => setImagePreview(e.target.result);
     reader.readAsDataURL(file);
+  };
+
+  // NEW: handle pasted image URL
+  const handleImageUrlChange = (url) => {
+    setImageUrlInput(url || "");
+    setNewImageFile(null);
+    setImageMode("url");
+    if (!url) {
+      setImagePreview(detail?.image_url || null);
+      return;
+    }
+    // set preview to the url (will load if valid)
+    setImagePreview(url);
+    // also update detail so saveEdits can pick it up
+    setDetail((d) => ({ ...(d || {}), image_url: url }));
   };
 
   // ===== SAVE: send ingredients_data & steps_data (fix) =====
@@ -320,6 +352,9 @@ const RecipeList = () => {
         form.append("ingredients_data", JSON.stringify(ingredientsData));
         form.append("steps_data", JSON.stringify(stepsData));
         form.append("image", newImageFile); // adjust key if API expects a different name
+
+        // If a URL was present previously, we don't append it; file takes precedence.
+
         await axiosInstance.put(`${API_BASE}${detail.id}/`, form, {
           headers: { "Content-Type": "multipart/form-data" },
         });
@@ -330,6 +365,12 @@ const RecipeList = () => {
           ingredients_data: ingredientsData,
           steps_data: stepsData,
         };
+
+        // NEW: if user pasted image URL (detail.image_url), include it in JSON payload
+        if (detail.image_url) {
+          payload.image_url = detail.image_url;
+        }
+
         await axiosInstance.put(`${API_BASE}${detail.id}/`, payload, {
           headers: { "Content-Type": "application/json" },
         });
@@ -344,6 +385,7 @@ const RecipeList = () => {
       updated.category = updated.category || [];
       setDetail(updated);
       setImagePreview(updated.image_url || null);
+      setImageUrlInput(updated.image_url || "");
       setNewImageFile(null);
       setIsEditing(false);
 
@@ -937,17 +979,113 @@ const RecipeList = () => {
 
                           {isEditing && (
                             <>
-                              <input
-                                type="file"
-                                accept="image/*"
-                                className="form-control form-control-sm mb-2"
-                                onChange={(e) =>
-                                  handleImageFile(e.target.files[0])
-                                }
-                              />
-                              <small className="text-muted d-block">
-                                Choose a new image to upload (sent on Save).
-                              </small>
+                              {/* NEW: Upload vs Paste URL toggle */}
+                              <div className="mb-2 d-flex gap-2 align-items-center">
+                                <div className="form-check">
+                                  <input
+                                    className="form-check-input"
+                                    type="radio"
+                                    name="imageMode"
+                                    id="modeUpload"
+                                    value="upload"
+                                    checked={imageMode === "upload"}
+                                    onChange={() => {
+                                      setImageMode("upload");
+                                      setImageUrlInput("");
+                                      setImagePreview(
+                                        detail?.image_url || null
+                                      );
+                                      setNewImageFile(null);
+                                    }}
+                                  />
+                                  <label
+                                    className="form-check-label"
+                                    htmlFor="modeUpload"
+                                  >
+                                    Upload file
+                                  </label>
+                                </div>
+
+                                <div className="form-check">
+                                  <input
+                                    className="form-check-input"
+                                    type="radio"
+                                    name="imageMode"
+                                    id="modeUrl"
+                                    value="url"
+                                    checked={imageMode === "url"}
+                                    onChange={() => {
+                                      setImageMode("url");
+                                      setNewImageFile(null);
+                                      setImagePreview(
+                                        detail?.image_url || null
+                                      );
+                                    }}
+                                  />
+                                  <label
+                                    className="form-check-label"
+                                    htmlFor="modeUrl"
+                                  >
+                                    Paste URL
+                                  </label>
+                                </div>
+                              </div>
+
+                              {imageMode === "upload" ? (
+                                <>
+                                  <input
+                                    type="file"
+                                    accept="image/*"
+                                    className="form-control form-control-sm mb-2"
+                                    onChange={(e) =>
+                                      handleImageFile(e.target.files[0])
+                                    }
+                                  />
+                                  <small className="text-muted d-block">
+                                    Choose a new image to upload (sent on Save).
+                                  </small>
+                                </>
+                              ) : (
+                                <>
+                                  <input
+                                    type="url"
+                                    className="form-control form-control-sm mb-2"
+                                    placeholder="https://example.com/logo.png"
+                                    value={imageUrlInput}
+                                    onChange={(e) =>
+                                      handleImageUrlChange(e.target.value)
+                                    }
+                                  />
+                                  <div className="d-flex gap-2">
+                                    <button
+                                      className="btn btn-sm btn-outline-secondary"
+                                      onClick={() => {
+                                        // if user wants to quickly use the original detail.image_url
+                                        handleImageUrlChange(
+                                          detail?.image_url || ""
+                                        );
+                                      }}
+                                      type="button"
+                                    >
+                                      Use original
+                                    </button>
+                                    <button
+                                      className="btn btn-sm btn-outline-primary"
+                                      onClick={() => {
+                                        // re-validate / reload preview by re-setting preview
+                                        handleImageUrlChange(imageUrlInput);
+                                      }}
+                                      type="button"
+                                    >
+                                      Preview URL
+                                    </button>
+                                  </div>
+                                  <small className="text-muted d-block mt-1">
+                                    Paste an absolute image URL. This URL will
+                                    be saved as <code>image_url</code>.
+                                  </small>
+                                </>
+                              )}
                             </>
                           )}
                         </div>
