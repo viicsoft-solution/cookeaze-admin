@@ -1,16 +1,19 @@
 // src/components/RecipeList.js
 import React, { useEffect, useMemo, useState } from "react";
 import axios from "axios";
+import CloudinaryService from "./cloudinaryService";
 
 /**
- * RecipeList with:
- * - server-driven pagination (page, page_size)
- * - filters: search, category, country, min rating (attempted server-side via query params)
- * - client-side filtering fallback
- * - detailed modal with edit/delete and image upload support
- * - EDITABLE CATEGORIES with multiple selection support
+ * ✅ UPDATED: Direct Cloudinary upload in edit modal
+ * - When user selects an image file, we upload to Cloudinary immediately
+ * - We save the returned secure_url into `detail.image_url`
+ * - On Save, we send JSON (no multipart) with `image_url`
  *
- * Small fix: ensure we send `ingredients_data` and `steps_data` (the API expects those keys).
+ * Still supports:
+ * - paste URL mode
+ * - server pagination + filters
+ * - multi-select categories
+ * - ingredients_data + steps_data keys
  */
 
 const API_BASE = "https://api.cookeaze.app/api/recipes/";
@@ -45,13 +48,15 @@ const RecipeList = () => {
   const [availableCategories, setAvailableCategories] = useState([]);
 
   // image edit
-  const [newImageFile, setNewImageFile] = useState(null);
   const [imagePreview, setImagePreview] = useState(null);
 
-  // NEW: mode for image editing: 'upload' or 'url'
+  // mode for image editing: 'upload' or 'url'
   const [imageMode, setImageMode] = useState("upload");
-  // NEW: input state for pasted URL
+  // pasted URL input
   const [imageUrlInput, setImageUrlInput] = useState("");
+
+  // NEW: cloudinary upload state
+  const [uploadingImage, setUploadingImage] = useState(false);
 
   // misc
   const [statusMsg, setStatusMsg] = useState(null);
@@ -77,7 +82,8 @@ const RecipeList = () => {
       }
     };
     fetchCategories();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const buildUrl = (page = 1, size = pageSize) => {
     const params = new URLSearchParams();
@@ -103,8 +109,8 @@ const RecipeList = () => {
         typeof data.count === "number"
           ? data.count
           : replace
-          ? results.length
-          : recipes.length + results.length;
+            ? results.length
+            : recipes.length + results.length;
 
       setCount(serverCount);
       setNextUrl(data.next || null);
@@ -137,12 +143,6 @@ const RecipeList = () => {
     fetchRecipes(page, true);
   };
 
-  const loadMore = () => {
-    const nextPage = currentPage + 1;
-    if (nextPage > totalPages) return;
-    fetchRecipes(nextPage, false);
-  };
-
   const allCategories = useMemo(() => {
     const set = new Set();
     recipes.forEach((r) => (r.category || []).forEach((c) => c && set.add(c)));
@@ -162,10 +162,10 @@ const RecipeList = () => {
     setDetailLoading(true);
     setIsEditing(false);
     setStatusMsg(null);
-    setNewImageFile(null);
     setImagePreview(null);
     setImageMode("upload");
     setImageUrlInput("");
+    setUploadingImage(false);
 
     try {
       const res = await axiosInstance.get(`${API_BASE}${id}/`);
@@ -175,11 +175,9 @@ const RecipeList = () => {
       payload.category = payload.category || [];
       setDetail(payload);
 
-      // set preview and URL input appropriately
       const initialUrl = payload.image_url || null;
       setImagePreview(initialUrl);
       setImageUrlInput(initialUrl || "");
-      // if initial image exists, default to URL mode so user can see pasteable URL
       setImageMode(initialUrl ? "url" : "upload");
     } catch (err) {
       console.error("Error fetching recipe detail", err);
@@ -195,10 +193,10 @@ const RecipeList = () => {
     setDetail(null);
     setIsEditing(false);
     setStatusMsg(null);
-    setNewImageFile(null);
     setImagePreview(null);
     setImageMode("upload");
     setImageUrlInput("");
+    setUploadingImage(false);
   };
 
   // ===== Category toggle =====
@@ -248,7 +246,7 @@ const RecipeList = () => {
     setDetail((d) => ({
       ...d,
       ingredients: (d.ingredients || []).map((i) =>
-        i.id === id ? { ...i, [field]: value } : i
+        i.id === id ? { ...i, [field]: value } : i,
       ),
     }));
 
@@ -266,58 +264,93 @@ const RecipeList = () => {
     setDetail((d) => ({
       ...d,
       steps: (d.steps || []).map((s) =>
-        s.id === id ? { ...s, [field]: value } : s
+        s.id === id ? { ...s, [field]: value } : s,
       ),
     }));
 
-  const handleImageFile = (file) => {
-    if (!file) {
-      setNewImageFile(null);
-      setImagePreview(detail?.image_url || null);
+  // ✅ Upload file directly to Cloudinary and set detail.image_url
+  const uploadImageToCloudinary = async (file) => {
+    if (!file) return;
+
+    if (!file.type?.startsWith("image/")) {
+      setStatusMsg({ type: "danger", text: "Please select an image file." });
       return;
     }
-    setNewImageFile(file);
-    setImageUrlInput("");
-    setImageMode("upload");
+
+    setStatusMsg(null);
+    setUploadingImage(true);
+
+    try {
+      const uploadedUrl = await CloudinaryService.uploadFile(file, {
+        folder: "cookeaze_uploads/recipes",
+      });
+
+      setImageMode("url");
+      setImageUrlInput(uploadedUrl);
+      setImagePreview(uploadedUrl);
+
+      setDetail((d) => ({ ...(d || {}), image_url: uploadedUrl }));
+
+      setStatusMsg({ type: "success", text: "Image uploaded successfully ✅" });
+    } catch (e) {
+      console.error("Cloudinary upload error:", e);
+      setStatusMsg({
+        type: "danger",
+        text: "Image upload failed. Please try again.",
+      });
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
+  // input handler for file selection
+  const handleImageFileChange = (file) => {
+    if (!file) return;
+    // show instant preview while upload happens
     const reader = new FileReader();
     reader.onload = (e) => setImagePreview(e.target.result);
     reader.readAsDataURL(file);
+    // upload
+    uploadImageToCloudinary(file);
   };
 
-  // NEW: handle pasted image URL
+  // handle pasted image URL
   const handleImageUrlChange = (url) => {
     setImageUrlInput(url || "");
-    setNewImageFile(null);
     setImageMode("url");
     if (!url) {
       setImagePreview(detail?.image_url || null);
+      setDetail((d) => ({ ...(d || {}), image_url: d?.image_url || "" }));
       return;
     }
-    // set preview to the url (will load if valid)
     setImagePreview(url);
-    // also update detail so saveEdits can pick it up
     setDetail((d) => ({ ...(d || {}), image_url: url }));
   };
 
-  // ===== SAVE: send ingredients_data & steps_data (fix) =====
+  // ===== SAVE: JSON only (image is already in Cloudinary) =====
   const saveEdits = async () => {
     if (!detail || !detail.id) return;
     setStatusMsg(null);
+
+    if (uploadingImage) {
+      setStatusMsg({
+        type: "danger",
+        text: "Please wait for the image upload to finish.",
+      });
+      return;
+    }
+
     try {
-      // Basic fields
       const updateFields = {
         name: detail.name,
         description: detail.description,
         total_time: detail.total_time,
         servings: detail.servings,
         rating: detail.rating,
-        category: detail.category || [], // Include categories
-        // include other top-level fields if needed
+        category: detail.category || [],
       };
 
-      // Build arrays according to API schema (ingredients_data / steps_data)
       const ingredientsData = (detail.ingredients || []).map((ing) => {
-        // omit id for new ones; include for existing numeric ids
         const out = {
           name: ing.name ?? "",
           quantity: ing.quantity ?? "",
@@ -338,45 +371,20 @@ const RecipeList = () => {
         return out;
       });
 
-      // If user selected a new image file, send multipart and include JSON strings under the expected keys
-      if (newImageFile) {
-        const form = new FormData();
-        Object.entries(updateFields).forEach(([k, v]) => {
-          if (k === "category" && Array.isArray(v)) {
-            form.append(k, JSON.stringify(v));
-          } else {
-            form.append(k, v ?? "");
-          }
-        });
-        // IMPORTANT: use ingredients_data & steps_data keys (server expects these names)
-        form.append("ingredients_data", JSON.stringify(ingredientsData));
-        form.append("steps_data", JSON.stringify(stepsData));
-        form.append("image", newImageFile); // adjust key if API expects a different name
+      const payload = {
+        ...updateFields,
+        ingredients_data: ingredientsData,
+        steps_data: stepsData,
+      };
 
-        // If a URL was present previously, we don't append it; file takes precedence.
+      // include image_url if present (Cloudinary URL or pasted URL)
+      if (detail.image_url) payload.image_url = detail.image_url;
 
-        await axiosInstance.put(`${API_BASE}${detail.id}/`, form, {
-          headers: { "Content-Type": "multipart/form-data" },
-        });
-      } else {
-        // JSON payload - keys must match API model
-        const payload = {
-          ...updateFields,
-          ingredients_data: ingredientsData,
-          steps_data: stepsData,
-        };
+      await axiosInstance.put(`${API_BASE}${detail.id}/`, payload, {
+        headers: { "Content-Type": "application/json" },
+      });
 
-        // NEW: if user pasted image URL (detail.image_url), include it in JSON payload
-        if (detail.image_url) {
-          payload.image_url = detail.image_url;
-        }
-
-        await axiosInstance.put(`${API_BASE}${detail.id}/`, payload, {
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      // Re-fetch detail so we reflect server-side changes (IDs, ordering, etc.)
+      // Re-fetch detail
       const res = await axiosInstance.get(`${API_BASE}${detail.id}/`);
       const updated = res.data.data || res.data;
       updated.ingredients =
@@ -386,12 +394,10 @@ const RecipeList = () => {
       setDetail(updated);
       setImagePreview(updated.image_url || null);
       setImageUrlInput(updated.image_url || "");
-      setNewImageFile(null);
       setIsEditing(false);
 
-      // Update list preview (optimistic)
       setRecipes((prev) =>
-        prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r))
+        prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)),
       );
 
       setStatusMsg({ type: "success", text: "Recipe updated successfully." });
@@ -432,7 +438,7 @@ const RecipeList = () => {
       if (
         categoryFilter &&
         !(r.category || []).some(
-          (c) => c && c.toLowerCase() === categoryFilter.toLowerCase()
+          (c) => c && c.toLowerCase() === categoryFilter.toLowerCase(),
         )
       )
         return false;
@@ -706,21 +712,17 @@ const RecipeList = () => {
                   ) : (
                     <li
                       key={p}
-                      className={`page-item ${
-                        p === currentPage ? "active" : ""
-                      }`}
+                      className={`page-item ${p === currentPage ? "active" : ""}`}
                     >
                       <button className="page-link" onClick={() => goToPage(p)}>
                         {p}
                       </button>
                     </li>
-                  )
+                  ),
                 )}
 
                 <li
-                  className={`page-item ${
-                    currentPage === totalPages ? "disabled" : ""
-                  }`}
+                  className={`page-item ${currentPage === totalPages ? "disabled" : ""}`}
                 >
                   <button
                     className="page-link"
@@ -731,9 +733,7 @@ const RecipeList = () => {
                 </li>
 
                 <li
-                  className={`page-item ${
-                    currentPage === totalPages ? "disabled" : ""
-                  }`}
+                  className={`page-item ${currentPage === totalPages ? "disabled" : ""}`}
                 >
                   <button
                     className="page-link"
@@ -829,7 +829,7 @@ const RecipeList = () => {
                                       key={cat.id}
                                       className={`category-checkbox-item ${
                                         (detail.category || []).includes(
-                                          cat.category_name
+                                          cat.category_name,
                                         )
                                           ? "selected"
                                           : ""
@@ -979,7 +979,7 @@ const RecipeList = () => {
 
                           {isEditing && (
                             <>
-                              {/* NEW: Upload vs Paste URL toggle */}
+                              {/* Upload vs Paste URL toggle */}
                               <div className="mb-2 d-flex gap-2 align-items-center">
                                 <div className="form-check">
                                   <input
@@ -993,9 +993,8 @@ const RecipeList = () => {
                                       setImageMode("upload");
                                       setImageUrlInput("");
                                       setImagePreview(
-                                        detail?.image_url || null
+                                        detail?.image_url || null,
                                       );
-                                      setNewImageFile(null);
                                     }}
                                   />
                                   <label
@@ -1016,10 +1015,10 @@ const RecipeList = () => {
                                     checked={imageMode === "url"}
                                     onChange={() => {
                                       setImageMode("url");
-                                      setNewImageFile(null);
                                       setImagePreview(
-                                        detail?.image_url || null
+                                        detail?.image_url || null,
                                       );
+                                      setImageUrlInput(detail?.image_url || "");
                                     }}
                                   />
                                   <label
@@ -1037,12 +1036,15 @@ const RecipeList = () => {
                                     type="file"
                                     accept="image/*"
                                     className="form-control form-control-sm mb-2"
+                                    disabled={uploadingImage}
                                     onChange={(e) =>
-                                      handleImageFile(e.target.files[0])
+                                      handleImageFileChange(e.target.files?.[0])
                                     }
                                   />
                                   <small className="text-muted d-block">
-                                    Choose a new image to upload (sent on Save).
+                                    {uploadingImage
+                                      ? "Uploading to Cloudinary..."
+                                      : "Choose an image. It uploads immediately and saves as URL."}
                                   </small>
                                 </>
                               ) : (
@@ -1055,27 +1057,28 @@ const RecipeList = () => {
                                     onChange={(e) =>
                                       handleImageUrlChange(e.target.value)
                                     }
+                                    disabled={uploadingImage}
                                   />
                                   <div className="d-flex gap-2">
                                     <button
                                       className="btn btn-sm btn-outline-secondary"
-                                      onClick={() => {
-                                        // if user wants to quickly use the original detail.image_url
+                                      onClick={() =>
                                         handleImageUrlChange(
-                                          detail?.image_url || ""
-                                        );
-                                      }}
+                                          detail?.image_url || "",
+                                        )
+                                      }
                                       type="button"
+                                      disabled={uploadingImage}
                                     >
                                       Use original
                                     </button>
                                     <button
                                       className="btn btn-sm btn-outline-primary"
-                                      onClick={() => {
-                                        // re-validate / reload preview by re-setting preview
-                                        handleImageUrlChange(imageUrlInput);
-                                      }}
+                                      onClick={() =>
+                                        handleImageUrlChange(imageUrlInput)
+                                      }
                                       type="button"
+                                      disabled={uploadingImage}
                                     >
                                       Preview URL
                                     </button>
@@ -1128,7 +1131,7 @@ const RecipeList = () => {
                                           updateIngredient(
                                             ing.id,
                                             "quantity",
-                                            e.target.value
+                                            e.target.value,
                                           )
                                         }
                                       />
@@ -1140,7 +1143,7 @@ const RecipeList = () => {
                                           updateIngredient(
                                             ing.id,
                                             "unit",
-                                            e.target.value
+                                            e.target.value,
                                           )
                                         }
                                       />
@@ -1154,7 +1157,7 @@ const RecipeList = () => {
                                           updateIngredient(
                                             ing.id,
                                             "name",
-                                            e.target.value
+                                            e.target.value,
                                           )
                                         }
                                       />
@@ -1217,7 +1220,7 @@ const RecipeList = () => {
                                           updateStep(
                                             s.id,
                                             "step_number",
-                                            Number(e.target.value)
+                                            Number(e.target.value),
                                           )
                                         }
                                       />
@@ -1229,7 +1232,7 @@ const RecipeList = () => {
                                           updateStep(
                                             s.id,
                                             "step_type",
-                                            e.target.value
+                                            e.target.value,
                                           )
                                         }
                                       >
@@ -1245,7 +1248,7 @@ const RecipeList = () => {
                                           updateStep(
                                             s.id,
                                             "duration",
-                                            Number(e.target.value)
+                                            Number(e.target.value),
                                           )
                                         }
                                       />
@@ -1260,7 +1263,7 @@ const RecipeList = () => {
                                           updateStep(
                                             s.id,
                                             "description",
-                                            e.target.value
+                                            e.target.value,
                                           )
                                         }
                                       />
@@ -1296,7 +1299,10 @@ const RecipeList = () => {
                 <div className="modal-footer">
                   <div className="me-auto">
                     {isEditing ? (
-                      <small className="text-muted">Editing — click Save</small>
+                      <small className="text-muted">
+                        Editing — click Save{" "}
+                        {uploadingImage ? "(uploading image...)" : ""}
+                      </small>
                     ) : (
                       <small className="text-muted">View</small>
                     )}
@@ -1309,6 +1315,7 @@ const RecipeList = () => {
                           <button
                             className="btn btn-danger"
                             onClick={() => deleteRecipe(detail.id)}
+                            disabled={uploadingImage}
                           >
                             Delete
                           </button>
@@ -1318,12 +1325,14 @@ const RecipeList = () => {
                               setIsEditing(false);
                               openDetail(detail.id);
                             }}
+                            disabled={uploadingImage}
                           >
                             Cancel
                           </button>
                           <button
                             className="btn btn-primary"
                             onClick={saveEdits}
+                            disabled={uploadingImage}
                           >
                             Save
                           </button>

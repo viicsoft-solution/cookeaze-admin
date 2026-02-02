@@ -13,6 +13,8 @@ import {
   ChevronRight,
 } from "lucide-react";
 
+import cloudinaryService from "./cloudinaryService";
+
 const HomeSectionAdmin = () => {
   const [sections, setSections] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -40,6 +42,8 @@ const HomeSectionAdmin = () => {
     item_type: "recipe",
     item_id: "",
     card_color: "#FF5733",
+    image_url: "",
+    link_url: "",
   });
   const [showItemForm, setShowItemForm] = useState(false);
 
@@ -48,6 +52,8 @@ const HomeSectionAdmin = () => {
     item_type: "recipe",
     item_id: "",
     card_color: "#FF5733",
+    image_url: "",
+    link_url: "",
   });
   const [showEditItemForm, setShowEditItemForm] = useState(false);
 
@@ -79,11 +85,22 @@ const HomeSectionAdmin = () => {
   const [editRecipesSearch, setEditRecipesSearch] = useState("");
   const [editRecipesSearchInput, setEditRecipesSearchInput] = useState("");
 
+  // ✅ Cloudinary upload states (create + edit)
+  const [newBannerFile, setNewBannerFile] = useState(null);
+  const [editBannerFile, setEditBannerFile] = useState(null);
+  const [uploadingNewBanner, setUploadingNewBanner] = useState(false);
+  const [uploadingEditBanner, setUploadingEditBanner] = useState(false);
+
   const API_BASE = "https://api.cookeaze.app/api/home-sections";
   const RECIPES_API = "https://api.cookeaze.app/api/recipes/";
   const THEMES_API = "https://api.cookeaze.app/api/themes-recipes/";
 
-  const sectionTypes = ["hero_carousel", "themed_recipe_grid", "recipe_grid"];
+  const sectionTypes = [
+    "hero_carousel",
+    "themed_recipe_grid",
+    "recipe_grid",
+    "graphic_banner",
+  ];
 
   // Fetch sections on mount
   useEffect(() => {
@@ -115,7 +132,7 @@ const HomeSectionAdmin = () => {
       fetchEditAvailableItems(
         editItem.item_type,
         editRecipesPage,
-        editRecipesSearch
+        editRecipesSearch,
       );
     }
   }, [
@@ -129,7 +146,7 @@ const HomeSectionAdmin = () => {
   useEffect(() => {
     if (newItem.item_id && availableItems.length > 0) {
       const selected = availableItems.find(
-        (item) => item.id === parseInt(newItem.item_id)
+        (item) => item.id === parseInt(newItem.item_id),
       );
       setSelectedItemPreview(selected || null);
     } else {
@@ -141,7 +158,7 @@ const HomeSectionAdmin = () => {
   useEffect(() => {
     if (editItem.item_id && editAvailableItems.length > 0) {
       const selected = editAvailableItems.find(
-        (item) => item.id === parseInt(editItem.item_id)
+        (item) => item.id === parseInt(editItem.item_id),
       );
       setEditItemPreview(selected || null);
     } else {
@@ -154,7 +171,50 @@ const HomeSectionAdmin = () => {
     setAlertType(type);
   };
 
-  // Fetch sections from API
+  const isGraphicBanner = (type) => type === "graphic_banner";
+
+  // ✅ Upload helpers
+  const uploadNewBannerToCloudinary = async () => {
+    if (!newBannerFile) {
+      showAlert("Please choose a file first", "warning");
+      return;
+    }
+    try {
+      setUploadingNewBanner(true);
+      const url = await cloudinaryService.uploadFile(newBannerFile, {
+        folder: "cookeaze_uploads",
+      });
+      setNewItem((prev) => ({ ...prev, image_url: url }));
+      showAlert("Banner uploaded successfully", "success");
+    } catch (e) {
+      console.error(e);
+      showAlert("Banner upload failed", "danger");
+    } finally {
+      setUploadingNewBanner(false);
+    }
+  };
+
+  const uploadEditBannerToCloudinary = async () => {
+    if (!editBannerFile) {
+      showAlert("Please choose a file first", "warning");
+      return;
+    }
+    try {
+      setUploadingEditBanner(true);
+      const url = await cloudinaryService.uploadFile(editBannerFile, {
+        folder: "cookeaze_uploads",
+      });
+      setEditItem((prev) => ({ ...prev, image_url: url }));
+      showAlert("Banner uploaded successfully", "success");
+    } catch (e) {
+      console.error(e);
+      showAlert("Banner upload failed", "danger");
+    } finally {
+      setUploadingEditBanner(false);
+    }
+  };
+
+  // Fetch sections
   const fetchSections = async () => {
     try {
       setLoading(true);
@@ -176,16 +236,14 @@ const HomeSectionAdmin = () => {
     }
   };
 
-  // Fetch available items based on type (for create)
+  // Fetch available items (create)
   const fetchAvailableItems = async (itemType, page = 1, search = "") => {
     try {
       setLoadingItems(true);
 
       if (itemType === "recipe") {
         let apiUrl = `${RECIPES_API}?page=${page}`;
-        if (search) {
-          apiUrl += `&search=${encodeURIComponent(search)}`;
-        }
+        if (search) apiUrl += `&search=${encodeURIComponent(search)}`;
 
         const response = await fetch(apiUrl, {
           headers: { accept: "application/json" },
@@ -196,8 +254,7 @@ const HomeSectionAdmin = () => {
           setAvailableItems(data.data.results || []);
           const totalCount = data.data.count;
           const itemsPerPage = data.data.results?.length || 10;
-          const calculatedTotalPages = Math.ceil(totalCount / itemsPerPage);
-          setRecipesTotalPages(calculatedTotalPages);
+          setRecipesTotalPages(Math.ceil(totalCount / itemsPerPage));
         } else {
           showAlert(`Failed to fetch ${itemType}s`, "warning");
           setAvailableItems([]);
@@ -208,9 +265,8 @@ const HomeSectionAdmin = () => {
         });
         const data = await response.json();
 
-        if (data.isSuccessful) {
-          setAvailableItems(data.data.results || []);
-        } else {
+        if (data.isSuccessful) setAvailableItems(data.data.results || []);
+        else {
           showAlert(`Failed to fetch ${itemType}s`, "warning");
           setAvailableItems([]);
         }
@@ -224,16 +280,14 @@ const HomeSectionAdmin = () => {
     }
   };
 
-  // Fetch available items based on type (for edit)
+  // Fetch available items (edit)
   const fetchEditAvailableItems = async (itemType, page = 1, search = "") => {
     try {
       setLoadingEditItems(true);
 
       if (itemType === "recipe") {
         let apiUrl = `${RECIPES_API}?page=${page}`;
-        if (search) {
-          apiUrl += `&search=${encodeURIComponent(search)}`;
-        }
+        if (search) apiUrl += `&search=${encodeURIComponent(search)}`;
 
         const response = await fetch(apiUrl, {
           headers: { accept: "application/json" },
@@ -244,8 +298,7 @@ const HomeSectionAdmin = () => {
           setEditAvailableItems(data.data.results || []);
           const totalCount = data.data.count;
           const itemsPerPage = data.data.results?.length || 10;
-          const calculatedTotalPages = Math.ceil(totalCount / itemsPerPage);
-          setEditRecipesTotalPages(calculatedTotalPages);
+          setEditRecipesTotalPages(Math.ceil(totalCount / itemsPerPage));
         } else {
           showAlert(`Failed to fetch ${itemType}s`, "warning");
           setEditAvailableItems([]);
@@ -256,9 +309,8 @@ const HomeSectionAdmin = () => {
         });
         const data = await response.json();
 
-        if (data.isSuccessful) {
-          setEditAvailableItems(data.data.results || []);
-        } else {
+        if (data.isSuccessful) setEditAvailableItems(data.data.results || []);
+        else {
           showAlert(`Failed to fetch ${itemType}s`, "warning");
           setEditAvailableItems([]);
         }
@@ -272,19 +324,16 @@ const HomeSectionAdmin = () => {
     }
   };
 
-  // Handle search for create mode
   const handleRecipesSearch = () => {
     setRecipesSearch(recipesSearchInput);
     setRecipesPage(1);
   };
 
-  // Handle search for edit mode
   const handleEditRecipesSearch = () => {
     setEditRecipesSearch(editRecipesSearchInput);
     setEditRecipesPage(1);
   };
 
-  // Open select modal (create mode)
   const openSelectModal = () => {
     setShowSelectModal(true);
     setRecipesPage(1);
@@ -292,7 +341,6 @@ const HomeSectionAdmin = () => {
     setRecipesSearchInput("");
   };
 
-  // Open select modal (edit mode)
   const openEditSelectModal = () => {
     setShowEditSelectModal(true);
     setEditRecipesPage(1);
@@ -300,30 +348,24 @@ const HomeSectionAdmin = () => {
     setEditRecipesSearchInput("");
   };
 
-  // Select item from modal (create mode)
   const selectItemFromModal = (item) => {
     setNewItem({ ...newItem, item_id: item.id.toString() });
     setSelectedItemPreview(item);
     setShowSelectModal(false);
   };
 
-  // Select item from modal (edit mode)
   const selectEditItemFromModal = (item) => {
     setEditItem({ ...editItem, item_id: item.id.toString() });
     setEditItemPreview(item);
     setShowEditSelectModal(false);
   };
 
-  // Convert hex color to 10-digit integer (ARGB format)
   const hexToArgbInt = (hex) => {
     hex = hex.replace("#", "");
-    if (hex.length === 6) {
-      hex = "FF" + hex;
-    }
+    if (hex.length === 6) hex = "FF" + hex;
     return parseInt(hex, 16);
   };
 
-  // Convert ARGB integer to hex color
   const argbIntToHex = (argbInt) => {
     const hex = argbInt.toString(16).padStart(8, "0");
     return "#" + hex.slice(2);
@@ -365,12 +407,23 @@ const HomeSectionAdmin = () => {
           items: [],
         });
         setShowForm(false);
-        setNewItem({ item_type: "recipe", item_id: "", card_color: "#FF5733" });
+        setNewItem({
+          item_type: "recipe",
+          item_id: "",
+          card_color: "#FF5733",
+          image_url: "",
+          link_url: "",
+        });
         setShowItemForm(false);
         setSelectedItemPreview(null);
         setRecipesPage(1);
         setRecipesSearch("");
         setRecipesSearchInput("");
+
+        // reset cloudinary file states
+        setNewBannerFile(null);
+        setUploadingNewBanner(false);
+
         showAlert("Section created successfully", "success");
       } else {
         showAlert(data.message || "Failed to create section", "danger");
@@ -417,6 +470,11 @@ const HomeSectionAdmin = () => {
         setEditRecipesPage(1);
         setEditRecipesSearch("");
         setEditRecipesSearchInput("");
+
+        // reset edit upload states
+        setEditBannerFile(null);
+        setUploadingEditBanner(false);
+
         showAlert("Section updated successfully", "success");
       } else {
         showAlert(data.message || "Failed to update section", "danger");
@@ -464,55 +522,120 @@ const HomeSectionAdmin = () => {
     setSelectedId(null);
   };
 
-  // Add item to section (create mode)
+  // Add item to section (create)
   const addItemToSection = () => {
-    if (!newItem.item_id) {
-      showAlert("Please select an item", "warning");
-      return;
+    const isGraphicBannerSection = isGraphicBanner(newSection.type);
+
+    if (isGraphicBannerSection) {
+      if (newItem.item_id) {
+        if (!newItem.image_url) {
+          showAlert("Please upload/select an image first", "warning");
+          return;
+        }
+      } else {
+        if (!newItem.image_url || !newItem.link_url) {
+          showAlert("Please provide both image and link URL", "warning");
+          return;
+        }
+      }
+    } else {
+      if (!newItem.item_id) {
+        showAlert("Please select an item", "warning");
+        return;
+      }
     }
 
     const item = {
       item_type: newItem.item_type,
-      item_id: parseInt(newItem.item_id),
       card_color: hexToArgbInt(newItem.card_color),
     };
+
+    if (newItem.item_id) item.item_id = parseInt(newItem.item_id);
+
+    if (isGraphicBannerSection) {
+      if (newItem.image_url) item.image_url = newItem.image_url;
+      if (newItem.link_url) item.link_url = newItem.link_url;
+    }
 
     setNewSection({
       ...newSection,
       items: [...newSection.items, item],
     });
 
-    setNewItem({ item_type: "recipe", item_id: "", card_color: "#FF5733" });
+    setNewItem({
+      item_type: "recipe",
+      item_id: "",
+      card_color: "#FF5733",
+      image_url: "",
+      link_url: "",
+    });
+
+    // reset upload file
+    setNewBannerFile(null);
+    setUploadingNewBanner(false);
+
     setShowItemForm(false);
     setSelectedItemPreview(null);
     showAlert("Item added to section", "success");
   };
 
-  // Add item to section (edit mode)
+  // Add item to section (edit)
   const addItemToEditSection = () => {
-    if (!editItem.item_id) {
-      showAlert("Please select an item", "warning");
-      return;
+    const isGraphicBannerSection = isGraphicBanner(editFormData.type);
+
+    if (isGraphicBannerSection) {
+      if (editItem.item_id) {
+        if (!editItem.image_url) {
+          showAlert("Please upload/select an image first", "warning");
+          return;
+        }
+      } else {
+        if (!editItem.image_url || !editItem.link_url) {
+          showAlert("Please provide both image and link URL", "warning");
+          return;
+        }
+      }
+    } else {
+      if (!editItem.item_id) {
+        showAlert("Please select an item", "warning");
+        return;
+      }
     }
 
     const item = {
       item_type: editItem.item_type,
-      item_id: parseInt(editItem.item_id),
       card_color: hexToArgbInt(editItem.card_color),
     };
+
+    if (editItem.item_id) item.item_id = parseInt(editItem.item_id);
+
+    if (isGraphicBannerSection) {
+      if (editItem.image_url) item.image_url = editItem.image_url;
+      if (editItem.link_url) item.link_url = editItem.link_url;
+    }
 
     setEditFormData({
       ...editFormData,
       items: [...(editFormData.items || []), item],
     });
 
-    setEditItem({ item_type: "recipe", item_id: "", card_color: "#FF5733" });
+    setEditItem({
+      item_type: "recipe",
+      item_id: "",
+      card_color: "#FF5733",
+      image_url: "",
+      link_url: "",
+    });
+
+    // reset upload file
+    setEditBannerFile(null);
+    setUploadingEditBanner(false);
+
     setShowEditItemForm(false);
     setEditItemPreview(null);
     showAlert("Item added to section", "success");
   };
 
-  // Remove item from section (create mode)
   const removeItemFromSection = (index) => {
     setNewSection({
       ...newSection,
@@ -520,7 +643,6 @@ const HomeSectionAdmin = () => {
     });
   };
 
-  // Remove item from section (edit mode)
   const removeItemFromEditSection = (index) => {
     setEditFormData({
       ...editFormData,
@@ -528,7 +650,6 @@ const HomeSectionAdmin = () => {
     });
   };
 
-  // Filter sections
   const filteredSections = sections.filter((section) => {
     const matchesType = filterType === "all" || section.type === filterType;
     const matchesSearch = section.title
@@ -548,7 +669,7 @@ const HomeSectionAdmin = () => {
           </p>
         </div>
 
-        {/* Alert Message */}
+        {/* Alert */}
         {alertMessage && (
           <div
             className={`alert alert-${alertType} alert-dismissible fade show`}
@@ -575,6 +696,7 @@ const HomeSectionAdmin = () => {
                 className="form-control"
               />
             </div>
+
             <div className="col-12 col-md-4">
               <select
                 value={filterType}
@@ -589,6 +711,7 @@ const HomeSectionAdmin = () => {
                 ))}
               </select>
             </div>
+
             <div className="col-12 col-md-4 d-grid">
               <button
                 onClick={() => setShowForm(true)}
@@ -618,6 +741,7 @@ const HomeSectionAdmin = () => {
                   className="form-control"
                 />
               </div>
+
               <div className="col-12 col-md-4">
                 <select
                   value={newSection.type}
@@ -633,6 +757,7 @@ const HomeSectionAdmin = () => {
                   ))}
                 </select>
               </div>
+
               <div className="col-12 col-md-4">
                 <input
                   type="number"
@@ -649,11 +774,12 @@ const HomeSectionAdmin = () => {
               </div>
             </div>
 
-            {/* Items Section */}
+            {/* Items */}
             <div className="mb-4">
               <h6 className="fw-bold mb-3">
                 Items ({newSection.items.length})
               </h6>
+
               {newSection.items.length > 0 && (
                 <div className="mb-3">
                   {newSection.items.map((item, idx) => (
@@ -670,13 +796,36 @@ const HomeSectionAdmin = () => {
                             border: "1px solid #ddd",
                             borderRadius: "4px",
                           }}
-                        ></div>
-                        <small className="text-muted">
-                          Type: <strong>{item.item_type}</strong> | ID:{" "}
-                          <strong>{item.item_id}</strong> | Color:{" "}
-                          <strong>{item.card_color}</strong>
-                        </small>
+                        />
+                        <div>
+                          <small className="text-muted d-block">
+                            Type: <strong>{item.item_type}</strong>
+                            {item.item_id && (
+                              <>
+                                {" "}
+                                | ID: <strong>{item.item_id}</strong>
+                              </>
+                            )}
+                            {" | Color: "}
+                            <strong>{item.card_color}</strong>
+                          </small>
+
+                          {item.image_url && (
+                            <small className="text-muted d-block">
+                              Image:{" "}
+                              <strong>{item.image_url.slice(0, 50)}...</strong>
+                            </small>
+                          )}
+
+                          {item.link_url && (
+                            <small className="text-muted d-block">
+                              Link:{" "}
+                              <strong>{item.link_url.slice(0, 50)}...</strong>
+                            </small>
+                          )}
+                        </div>
                       </div>
+
                       <button
                         onClick={() => removeItemFromSection(idx)}
                         className="btn btn-sm btn-outline-danger"
@@ -710,8 +859,45 @@ const HomeSectionAdmin = () => {
                       </select>
                     </div>
 
+                    {/* ✅ Graphic Banner: File picker + upload button */}
+                    {isGraphicBanner(newSection.type) && (
+                      <div className="col-12">
+                        <label className="form-label small">Banner Image</label>
+                        <div className="d-flex gap-2 flex-wrap">
+                          <input
+                            type="file"
+                            accept="image/*,video/*"
+                            className="form-control form-control-sm"
+                            onChange={(e) =>
+                              setNewBannerFile(e.target.files?.[0] || null)
+                            }
+                          />
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-primary"
+                            onClick={uploadNewBannerToCloudinary}
+                            disabled={uploadingNewBanner || !newBannerFile}
+                          >
+                            {uploadingNewBanner ? "Uploading..." : "Upload"}
+                          </button>
+                        </div>
+
+                        {/* show uploaded url */}
+                        {newItem.image_url && (
+                          <small className="text-muted d-block mt-2">
+                            Uploaded:{" "}
+                            <strong>{newItem.image_url.slice(0, 60)}...</strong>
+                          </small>
+                        )}
+                      </div>
+                    )}
+
                     <div className="col-12 col-md-4">
-                      <label className="form-label small">Select Item</label>
+                      <label className="form-label small">
+                        {isGraphicBanner(newSection.type)
+                          ? "Select Item (Optional)"
+                          : "Select Item"}
+                      </label>
                       <button
                         onClick={openSelectModal}
                         className="btn btn-sm btn-outline-primary w-100 text-start"
@@ -725,6 +911,25 @@ const HomeSectionAdmin = () => {
                       </button>
                     </div>
 
+                    {isGraphicBanner(newSection.type) && (
+                      <div className="col-12">
+                        <label className="form-label small">
+                          Link URL{" "}
+                          {!newItem.item_id &&
+                            "(Required for non-recipe items)"}
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="Enter link URL"
+                          value={newItem.link_url}
+                          onChange={(e) =>
+                            setNewItem({ ...newItem, link_url: e.target.value })
+                          }
+                          className="form-control form-control-sm"
+                        />
+                      </div>
+                    )}
+
                     <div className="col-12 col-md-2">
                       <label className="form-label small">Card Color</label>
                       <input
@@ -736,6 +941,7 @@ const HomeSectionAdmin = () => {
                         className="form-control form-control-color form-control-sm"
                       />
                     </div>
+
                     <div className="col-12 col-md-2 d-flex align-items-end">
                       <small className="text-muted">
                         {hexToArgbInt(newItem.card_color)}
@@ -743,7 +949,7 @@ const HomeSectionAdmin = () => {
                     </div>
                   </div>
 
-                  {/* Item Preview */}
+                  {/* Preview */}
                   {selectedItemPreview && (
                     <div className="mt-3 p-3 border rounded bg-white">
                       <h6 className="small fw-bold mb-2">Preview:</h6>
@@ -775,30 +981,6 @@ const HomeSectionAdmin = () => {
                           <p className="mb-1 small text-muted">
                             ID: {selectedItemPreview.id}
                           </p>
-                          {selectedItemPreview.description && (
-                            <p
-                              className="mb-0 small text-secondary"
-                              style={{ maxHeight: "60px", overflow: "hidden" }}
-                            >
-                              {selectedItemPreview.description.slice(0, 100)}...
-                            </p>
-                          )}
-                          {selectedItemPreview.color && (
-                            <div className="d-flex align-items-center gap-2 mt-2">
-                              <small className="text-muted">Theme Color:</small>
-                              <div
-                                style={{
-                                  width: "20px",
-                                  height: "20px",
-                                  backgroundColor: argbIntToHex(
-                                    selectedItemPreview.color
-                                  ),
-                                  border: "1px solid #ddd",
-                                  borderRadius: "4px",
-                                }}
-                              ></div>
-                            </div>
-                          )}
                         </div>
                       </div>
                     </div>
@@ -808,10 +990,16 @@ const HomeSectionAdmin = () => {
                     <button
                       onClick={addItemToSection}
                       className="btn btn-sm btn-primary"
-                      disabled={!newItem.item_id}
+                      disabled={
+                        isGraphicBanner(newSection.type)
+                          ? !newItem.image_url ||
+                            (!newItem.item_id && !newItem.link_url)
+                          : !newItem.item_id
+                      }
                     >
                       <Save size={16} className="me-1" /> Add Item
                     </button>
+
                     <button
                       onClick={() => {
                         setShowItemForm(false);
@@ -819,8 +1007,14 @@ const HomeSectionAdmin = () => {
                           item_type: "recipe",
                           item_id: "",
                           card_color: "#FF5733",
+                          image_url: "",
+                          link_url: "",
                         });
                         setSelectedItemPreview(null);
+
+                        // reset upload state
+                        setNewBannerFile(null);
+                        setUploadingNewBanner(false);
                       }}
                       className="btn btn-sm btn-secondary"
                     >
@@ -846,6 +1040,7 @@ const HomeSectionAdmin = () => {
               >
                 <Save size={18} /> {loading ? "Saving..." : "Save"}
               </button>
+
               <button
                 onClick={() => {
                   setShowForm(false);
@@ -860,8 +1055,13 @@ const HomeSectionAdmin = () => {
                     item_type: "recipe",
                     item_id: "",
                     card_color: "#FF5733",
+                    image_url: "",
+                    link_url: "",
                   });
                   setSelectedItemPreview(null);
+
+                  setNewBannerFile(null);
+                  setUploadingNewBanner(false);
                 }}
                 className="btn btn-secondary d-flex align-items-center gap-2"
               >
@@ -917,25 +1117,41 @@ const HomeSectionAdmin = () => {
                       onClick={(e) => {
                         e.stopPropagation();
                         setEditingId(section.id);
-                        const editableItems =
-                          section.items?.map((item) => ({
-                            item_type: item.item?.themeName
-                              ? "theme"
-                              : "recipe",
-                            item_id: item.item?.id,
-                            card_color: item.cardColor || 0,
-                          })) || [];
 
-                        setEditFormData({
-                          ...section,
-                          items: editableItems,
-                        });
+                        const editableItems =
+                          section.items?.map((item) => {
+                            const mappedItem = {
+                              item_type: item.item?.themeName
+                                ? "theme"
+                                : "recipe",
+                              card_color: item.cardColor || 0,
+                            };
+
+                            if (item.item?.id)
+                              mappedItem.item_id = item.item.id;
+                            if (item.imageUrl)
+                              mappedItem.image_url = item.imageUrl;
+
+                            if (item.linkUrl)
+                              mappedItem.link_url = item.linkUrl;
+                            else if (item.link_url)
+                              mappedItem.link_url = item.link_url;
+
+                            return mappedItem;
+                          }) || [];
+
+                        setEditFormData({ ...section, items: editableItems });
+
+                        // reset edit upload state
+                        setEditBannerFile(null);
+                        setUploadingEditBanner(false);
                       }}
                       className="btn btn-outline-primary btn-sm"
                       title="Edit"
                     >
                       <Edit2 size={18} />
                     </button>
+
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -953,6 +1169,7 @@ const HomeSectionAdmin = () => {
                 {editingId === section.id && (
                   <div className="card-body bg-light">
                     <h6>Edit Section</h6>
+
                     <div className="row g-3 mb-3">
                       <div className="col-12 col-md-4">
                         <input
@@ -968,6 +1185,7 @@ const HomeSectionAdmin = () => {
                           className="form-control"
                         />
                       </div>
+
                       <div className="col-12 col-md-4">
                         <select
                           value={editFormData.type || ""}
@@ -986,6 +1204,7 @@ const HomeSectionAdmin = () => {
                           ))}
                         </select>
                       </div>
+
                       <div className="col-12 col-md-4">
                         <input
                           type="number"
@@ -1002,15 +1221,15 @@ const HomeSectionAdmin = () => {
                       </div>
                     </div>
 
-                    {/* Edit Items Section */}
+                    {/* Edit Items */}
                     <div className="mb-3">
                       <h6 className="fw-bold mb-3">
                         Items ({editFormData.items?.length || 0})
                       </h6>
+
                       {editFormData.items && editFormData.items.length > 0 && (
                         <div className="mb-3">
                           {editFormData.items.map((item, idx) => {
-                            // try to read the original item object from the section (safe access)
                             const originalItem =
                               section.items && section.items[idx]
                                 ? section.items[idx].item
@@ -1032,24 +1251,48 @@ const HomeSectionAdmin = () => {
                                       width: "30px",
                                       height: "30px",
                                       backgroundColor: argbIntToHex(
-                                        item.card_color
+                                        item.card_color,
                                       ),
                                       border: "1px solid #ddd",
                                       borderRadius: "4px",
                                     }}
-                                  ></div>
-
+                                  />
                                   <div>
                                     <small className="text-muted d-block">
-                                      Type: <strong>{item.item_type}</strong> |
-                                      ID: <strong>{item.item_id}</strong> |
-                                      Color: <strong>{item.card_color}</strong>
+                                      Type: <strong>{item.item_type}</strong>
+                                      {item.item_id && (
+                                        <>
+                                          {" "}
+                                          | ID: <strong>{item.item_id}</strong>
+                                        </>
+                                      )}
+                                      {" | Color: "}
+                                      <strong>{item.card_color}</strong>
                                     </small>
 
-                                    {/* New: show the item name */}
-                                    <small className="text-muted d-block">
-                                      Name: <strong>{displayName}</strong>
-                                    </small>
+                                    {item.item_id && (
+                                      <small className="text-muted d-block">
+                                        Name: <strong>{displayName}</strong>
+                                      </small>
+                                    )}
+
+                                    {item.image_url && (
+                                      <small className="text-muted d-block">
+                                        Image:{" "}
+                                        <strong>
+                                          {item.image_url.slice(0, 40)}...
+                                        </strong>
+                                      </small>
+                                    )}
+
+                                    {item.link_url && (
+                                      <small className="text-muted d-block">
+                                        Link:{" "}
+                                        <strong>
+                                          {item.link_url.slice(0, 40)}...
+                                        </strong>
+                                      </small>
+                                    )}
                                   </div>
                                 </div>
 
@@ -1089,22 +1332,85 @@ const HomeSectionAdmin = () => {
                               </select>
                             </div>
 
+                            {/* ✅ Graphic banner upload (edit) */}
+                            {isGraphicBanner(editFormData.type) && (
+                              <div className="col-12">
+                                <label className="form-label small">
+                                  Banner Image
+                                </label>
+                                <div className="d-flex gap-2 flex-wrap">
+                                  <input
+                                    type="file"
+                                    accept="image/*,video/*"
+                                    className="form-control form-control-sm"
+                                    onChange={(e) =>
+                                      setEditBannerFile(
+                                        e.target.files?.[0] || null,
+                                      )
+                                    }
+                                  />
+                                  <button
+                                    type="button"
+                                    className="btn btn-sm btn-outline-primary"
+                                    onClick={uploadEditBannerToCloudinary}
+                                    disabled={
+                                      uploadingEditBanner || !editBannerFile
+                                    }
+                                  >
+                                    {uploadingEditBanner
+                                      ? "Uploading..."
+                                      : "Upload"}
+                                  </button>
+                                </div>
+
+                                {editItem.image_url && (
+                                  <small className="text-muted d-block mt-2">
+                                    Uploaded:{" "}
+                                    <strong>
+                                      {editItem.image_url.slice(0, 60)}...
+                                    </strong>
+                                  </small>
+                                )}
+                              </div>
+                            )}
+
                             <div className="col-12 col-md-4">
                               <label className="form-label small">
-                                Select Item
+                                {isGraphicBanner(editFormData.type)
+                                  ? "Select Item (Optional)"
+                                  : "Select Item"}
                               </label>
                               <button
                                 onClick={openEditSelectModal}
                                 className="btn btn-sm btn-outline-primary w-100 text-start"
                               >
                                 {editItem.item_id
-                                  ? `${
-                                      editItemPreview?.name ||
-                                      editItemPreview?.themeName
-                                    }`
+                                  ? `${editItemPreview?.name || editItemPreview?.themeName}`
                                   : `Browse ${editItem.item_type}s...`}
                               </button>
                             </div>
+
+                            {isGraphicBanner(editFormData.type) && (
+                              <div className="col-12">
+                                <label className="form-label small">
+                                  Link URL{" "}
+                                  {!editItem.item_id &&
+                                    "(Required for non-recipe items)"}
+                                </label>
+                                <input
+                                  type="text"
+                                  placeholder="Enter link URL"
+                                  value={editItem.link_url}
+                                  onChange={(e) =>
+                                    setEditItem({
+                                      ...editItem,
+                                      link_url: e.target.value,
+                                    })
+                                  }
+                                  className="form-control form-control-sm"
+                                />
+                              </div>
+                            )}
 
                             <div className="col-12 col-md-2">
                               <label className="form-label small">
@@ -1122,6 +1428,7 @@ const HomeSectionAdmin = () => {
                                 className="form-control form-control-color form-control-sm"
                               />
                             </div>
+
                             <div className="col-12 col-md-2 d-flex align-items-end">
                               <small className="text-muted">
                                 {hexToArgbInt(editItem.card_color)}
@@ -1161,39 +1468,6 @@ const HomeSectionAdmin = () => {
                                   <p className="mb-1 small text-muted">
                                     ID: {editItemPreview.id}
                                   </p>
-                                  {editItemPreview.description && (
-                                    <p
-                                      className="mb-0 small text-secondary"
-                                      style={{
-                                        maxHeight: "60px",
-                                        overflow: "hidden",
-                                      }}
-                                    >
-                                      {editItemPreview.description.slice(
-                                        0,
-                                        100
-                                      )}
-                                      ...
-                                    </p>
-                                  )}
-                                  {editItemPreview.color && (
-                                    <div className="d-flex align-items-center gap-2 mt-2">
-                                      <small className="text-muted">
-                                        Theme Color:
-                                      </small>
-                                      <div
-                                        style={{
-                                          width: "20px",
-                                          height: "20px",
-                                          backgroundColor: argbIntToHex(
-                                            editItemPreview.color
-                                          ),
-                                          border: "1px solid #ddd",
-                                          borderRadius: "4px",
-                                        }}
-                                      ></div>
-                                    </div>
-                                  )}
                                 </div>
                               </div>
                             </div>
@@ -1203,10 +1477,16 @@ const HomeSectionAdmin = () => {
                             <button
                               onClick={addItemToEditSection}
                               className="btn btn-sm btn-primary"
-                              disabled={!editItem.item_id}
+                              disabled={
+                                isGraphicBanner(editFormData.type)
+                                  ? !editItem.image_url ||
+                                    (!editItem.item_id && !editItem.link_url)
+                                  : !editItem.item_id
+                              }
                             >
                               <Save size={16} className="me-1" /> Add Item
                             </button>
+
                             <button
                               onClick={() => {
                                 setShowEditItemForm(false);
@@ -1214,8 +1494,13 @@ const HomeSectionAdmin = () => {
                                   item_type: "recipe",
                                   item_id: "",
                                   card_color: "#FF5733",
+                                  image_url: "",
+                                  link_url: "",
                                 });
                                 setEditItemPreview(null);
+
+                                setEditBannerFile(null);
+                                setUploadingEditBanner(false);
                               }}
                               className="btn btn-sm btn-secondary"
                             >
@@ -1242,6 +1527,7 @@ const HomeSectionAdmin = () => {
                         <Save size={18} />{" "}
                         {loading ? "Saving..." : "Save Changes"}
                       </button>
+
                       <button
                         onClick={() => {
                           setEditingId(null);
@@ -1251,11 +1537,16 @@ const HomeSectionAdmin = () => {
                             item_type: "recipe",
                             item_id: "",
                             card_color: "#FF5733",
+                            image_url: "",
+                            link_url: "",
                           });
                           setEditItemPreview(null);
                           setEditRecipesPage(1);
                           setEditRecipesSearch("");
                           setEditRecipesSearchInput("");
+
+                          setEditBannerFile(null);
+                          setUploadingEditBanner(false);
                         }}
                         className="btn btn-secondary d-flex align-items-center gap-2"
                       >
@@ -1265,7 +1556,7 @@ const HomeSectionAdmin = () => {
                   </div>
                 )}
 
-                {/* Section Items */}
+                {/* Expanded Items */}
                 {expandedId === section.id && (
                   <div className="card-body bg-light">
                     <h6>Items ({section.items?.length || 0})</h6>
@@ -1300,12 +1591,12 @@ const HomeSectionAdmin = () => {
                                     width: "30px",
                                     height: "30px",
                                     backgroundColor: argbIntToHex(
-                                      item.cardColor
+                                      item.cardColor,
                                     ),
                                     border: "1px solid #ddd",
                                     borderRadius: "4px",
                                   }}
-                                ></div>
+                                />
                               )}
                               <div>
                                 <p className="mb-1 fw-bold">
@@ -1313,12 +1604,29 @@ const HomeSectionAdmin = () => {
                                     item.item?.themeName ||
                                     "Item #" + item.sectionItemId}
                                 </p>
-                                <p className="mb-0 small text-secondary">
-                                  ID: {item.item?.id}
-                                </p>
+                                {item.item?.id && (
+                                  <p className="mb-0 small text-secondary">
+                                    ID: {item.item.id}
+                                  </p>
+                                )}
                                 <p className="mb-0 small text-muted">
                                   Section Item ID: {item.sectionItemId}
                                 </p>
+                                {item.imageUrl && (
+                                  <p className="mb-0 small text-muted">
+                                    Image: {item.imageUrl.slice(0, 50)}...
+                                  </p>
+                                )}
+                                {(item.linkUrl || item.link_url) && (
+                                  <p className="mb-0 small text-muted">
+                                    Link:{" "}
+                                    {(item.linkUrl || item.link_url).slice(
+                                      0,
+                                      50,
+                                    )}
+                                    ...
+                                  </p>
+                                )}
                               </div>
                             </div>
                             <span className="badge bg-success">Active</span>
@@ -1347,7 +1655,7 @@ const HomeSectionAdmin = () => {
               <h4>
                 {filteredSections.reduce(
                   (sum, s) => sum + (s.items?.length || 0),
-                  0
+                  0,
                 )}
               </h4>
             </div>
@@ -1380,7 +1688,6 @@ const HomeSectionAdmin = () => {
                   ></button>
                 </div>
                 <div className="modal-body">
-                  {/* Search Bar */}
                   {newItem.item_type === "recipe" && (
                     <div className="mb-3">
                       <div className="input-group">
@@ -1407,7 +1714,6 @@ const HomeSectionAdmin = () => {
                     </div>
                   )}
 
-                  {/* Items List */}
                   {loadingItems ? (
                     <div className="text-center py-5">
                       <div className="spinner-border" role="status">
@@ -1479,7 +1785,6 @@ const HomeSectionAdmin = () => {
                     </div>
                   )}
 
-                  {/* Pagination */}
                   {newItem.item_type === "recipe" && recipesTotalPages > 1 && (
                     <div className="d-flex justify-content-center align-items-center gap-3 mt-4">
                       <button
@@ -1497,7 +1802,7 @@ const HomeSectionAdmin = () => {
                       <button
                         onClick={() =>
                           setRecipesPage((prev) =>
-                            Math.min(recipesTotalPages, prev + 1)
+                            Math.min(recipesTotalPages, prev + 1),
                           )
                         }
                         disabled={recipesPage === recipesTotalPages}
@@ -1522,7 +1827,7 @@ const HomeSectionAdmin = () => {
           </div>
         )}
 
-        {/* Select Item Modal (Edit Mode) */}
+        {/* Edit Modal */}
         {showEditSelectModal && (
           <div
             className="modal show d-block"
@@ -1543,7 +1848,6 @@ const HomeSectionAdmin = () => {
                   ></button>
                 </div>
                 <div className="modal-body">
-                  {/* Search Bar */}
                   {editItem.item_type === "recipe" && (
                     <div className="mb-3">
                       <div className="input-group">
@@ -1570,7 +1874,6 @@ const HomeSectionAdmin = () => {
                     </div>
                   )}
 
-                  {/* Items List */}
                   {loadingEditItems ? (
                     <div className="text-center py-5">
                       <div className="spinner-border" role="status">
@@ -1642,7 +1945,6 @@ const HomeSectionAdmin = () => {
                     </div>
                   )}
 
-                  {/* Pagination */}
                   {editItem.item_type === "recipe" &&
                     editRecipesTotalPages > 1 && (
                       <div className="d-flex justify-content-center align-items-center gap-3 mt-4">
@@ -1661,7 +1963,7 @@ const HomeSectionAdmin = () => {
                         <button
                           onClick={() =>
                             setEditRecipesPage((prev) =>
-                              Math.min(editRecipesTotalPages, prev + 1)
+                              Math.min(editRecipesTotalPages, prev + 1),
                             )
                           }
                           disabled={editRecipesPage === editRecipesTotalPages}

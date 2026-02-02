@@ -2,8 +2,9 @@
 
 // Modern, clean design with better visual hierarchy and improved user experience
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import axios from "axios";
+import CloudinaryService from "./cloudinaryService";
 
 const API_BASE = "https://api.cookeaze.app/api/recipes/";
 
@@ -29,7 +30,13 @@ export default function RecipeCreate() {
   const [steps, setSteps] = useState([emptyStep(1)]);
   const [submitting, setSubmitting] = useState(false);
   const [status, setStatus] = useState(null);
-  const token = localStorage.getItem("token");
+
+  // NEW: Upload states
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const token =
+    typeof window !== "undefined" ? localStorage.getItem("token") : null;
 
   const axiosInstance = axios.create({
     headers: {
@@ -42,7 +49,7 @@ export default function RecipeCreate() {
   const addIngredient = () => setIngredients((s) => [...s, emptyIngredient()]);
   const updateIngredient = (i, field, value) => {
     setIngredients((s) =>
-      s.map((ing, idx) => (idx === i ? { ...ing, [field]: value } : ing))
+      s.map((ing, idx) => (idx === i ? { ...ing, [field]: value } : ing)),
     );
   };
   const removeIngredient = (i) =>
@@ -52,7 +59,7 @@ export default function RecipeCreate() {
   const updateStep = (i, field, value) => {
     setSteps((s) => {
       const next = s.map((st, idx) =>
-        idx === i ? { ...st, [field]: value } : st
+        idx === i ? { ...st, [field]: value } : st,
       );
       return next.map((st, idx) => ({ ...st, step_number: idx + 1 }));
     });
@@ -73,7 +80,7 @@ export default function RecipeCreate() {
     const fetchCategories = async () => {
       try {
         const res = await axiosInstance.get(
-          "https://api.cookeaze.app/api/categories/"
+          "https://api.cookeaze.app/api/categories/",
         );
 
         // Access the correct array inside `data`
@@ -86,6 +93,7 @@ export default function RecipeCreate() {
       }
     };
     fetchCategories();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Toggle category selection
@@ -99,6 +107,40 @@ export default function RecipeCreate() {
     });
   };
 
+  // NEW: Upload to Cloudinary and set imageUrl
+  const handleImageFileChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // basic validation
+    if (!file.type?.startsWith("image/")) {
+      setStatus({ type: "danger", text: "Please select a valid image file." });
+      e.target.value = "";
+      return;
+    }
+
+    setStatus(null);
+    setUploadingImage(true);
+
+    try {
+      const uploadedUrl = await CloudinaryService.uploadFile(file, {
+        folder: "cookeaze_uploads/recipes",
+      });
+
+      setImageUrl(uploadedUrl);
+      setStatus({ type: "success", text: "Image uploaded successfully ✅" });
+    } catch (err) {
+      console.error("Cloudinary upload failed:", err);
+      setStatus({
+        type: "danger",
+        text: "Image upload failed. Please try again.",
+      });
+      setImageUrl("");
+    } finally {
+      setUploadingImage(false);
+    }
+  };
+
   const validate = () => {
     if (!name.trim()) {
       setStatus({ type: "danger", text: "Recipe name is required." });
@@ -107,7 +149,7 @@ export default function RecipeCreate() {
     if (!imageUrl.trim()) {
       setStatus({
         type: "danger",
-        text: "Image URL is required (public recipes require a valid image).",
+        text: "Image is required. Upload an image (or paste a valid URL).",
       });
       return false;
     }
@@ -157,8 +199,10 @@ export default function RecipeCreate() {
     };
 
     try {
-      const res = await axiosInstance.post(API_BASE, payload);
+      await axiosInstance.post(API_BASE, payload);
       setStatus({ type: "success", text: "Recipe created successfully." });
+
+      // reset
       setName("");
       setSelectedCategories([]);
       setImageUrl("");
@@ -171,6 +215,7 @@ export default function RecipeCreate() {
       setPrice("");
       setIngredients([emptyIngredient()]);
       setSteps([emptyStep(1)]);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     } catch (err) {
       console.error("Create failed:", err);
       const serverMsg =
@@ -586,7 +631,7 @@ export default function RecipeCreate() {
                           <input
                             type="checkbox"
                             checked={selectedCategories.includes(
-                              cat.category_name
+                              cat.category_name,
                             )}
                             onChange={() => toggleCategory(cat.category_name)}
                             style={styles.checkbox}
@@ -605,19 +650,45 @@ export default function RecipeCreate() {
                   </div>
                 </div>
 
+                {/* UPDATED: Upload to Cloudinary + URL fallback */}
                 <div style={styles.formGroup}>
                   <label style={styles.label}>
-                    Image URL
+                    Recipe Image
                     <span style={styles.required}>*</span>
                   </label>
+
                   <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
                     style={styles.input}
-                    value={imageUrl}
-                    onChange={(e) => setImageUrl(e.target.value)}
-                    placeholder="https://..."
+                    disabled={uploadingImage}
+                    onChange={handleImageFileChange}
                   />
+
                   <div style={styles.formHelper}>
-                    High-quality images perform better
+                    {uploadingImage
+                      ? "Uploading image to Cloudinary..."
+                      : "Upload an image (recommended) or paste a URL below."}
+                  </div>
+
+                  <div style={{ marginTop: "10px" }}>
+                    <label
+                      style={{
+                        ...styles.label,
+                        fontSize: "12px",
+                        color: "#666",
+                      }}
+                    >
+                      Or paste Image URL (optional fallback)
+                    </label>
+                    <input
+                      style={styles.input}
+                      value={imageUrl}
+                      onChange={(e) => setImageUrl(e.target.value)}
+                      placeholder="https://..."
+                      disabled={uploadingImage}
+                    />
                   </div>
                 </div>
               </div>
@@ -883,13 +954,15 @@ export default function RecipeCreate() {
                   onMouseLeave={(e) =>
                     (e.target.style.backgroundColor = "#d4a574")
                   }
-                  disabled={submitting}
+                  disabled={submitting || uploadingImage}
                 >
                   {submitting ? (
                     <span style={styles.spinnerContainer}>
                       <div style={styles.spinner} />
                       Creating...
                     </span>
+                  ) : uploadingImage ? (
+                    "Uploading image..."
                   ) : (
                     "Create Recipe"
                   )}
@@ -907,6 +980,7 @@ export default function RecipeCreate() {
                   onMouseLeave={(e) =>
                     (e.target.style.backgroundColor = "#f0ebe5")
                   }
+                  disabled={submitting || uploadingImage}
                   onClick={() => {
                     setName("");
                     setSelectedCategories([]);
@@ -921,6 +995,7 @@ export default function RecipeCreate() {
                     setIngredients([emptyIngredient()]);
                     setSteps([emptyStep(1)]);
                     setStatus(null);
+                    if (fileInputRef.current) fileInputRef.current.value = "";
                   }}
                 >
                   Reset
@@ -946,7 +1021,9 @@ export default function RecipeCreate() {
                 }}
               />
             ) : (
-              <div style={styles.previewImagePlaceholder}>No image yet</div>
+              <div style={styles.previewImagePlaceholder}>
+                {uploadingImage ? "Uploading..." : "No image yet"}
+              </div>
             )}
 
             <div style={styles.previewTitle}>{name || "Recipe name"}</div>
