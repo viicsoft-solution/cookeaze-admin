@@ -565,7 +565,7 @@ const RecipeList = () => {
             ))}
           </select>
 
-          <select
+          {/* <select
             className="form-select form-select-sm"
             style={{ width: 110 }}
             value={minRating}
@@ -589,7 +589,7 @@ const RecipeList = () => {
             <option value={9}>9</option>
             <option value={12}>12</option>
             <option value={24}>24</option>
-          </select>
+          </select> */}
 
           <button
             className="btn btn-outline-secondary btn-sm"

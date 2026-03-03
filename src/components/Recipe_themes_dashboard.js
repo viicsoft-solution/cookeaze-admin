@@ -26,7 +26,12 @@ const RecipeThemesDashboard = () => {
   const [recipeSearch, setRecipeSearch] = useState("");
   const [recipePage, setRecipePage] = useState(1);
   const [recipesCount, setRecipesCount] = useState(0);
-  const [recipeViewMode, setRecipeViewMode] = useState("all"); // NEW: Toggle between "all" and "selected"
+  const [recipeViewMode, setRecipeViewMode] = useState("all"); // "all" | "selected"
+
+  // ✅ NEW: Selected recipes (full details, not limited to current page)
+  const [selectedRecipesDetails, setSelectedRecipesDetails] = useState([]);
+  const [selectedLoading, setSelectedLoading] = useState(false);
+  const [selectedError, setSelectedError] = useState(null);
 
   useEffect(() => {
     fetchThemes();
@@ -65,6 +70,37 @@ const RecipeThemesDashboard = () => {
       setRecipesError(err.message);
     } finally {
       setRecipesLoading(false);
+    }
+  };
+
+  // ✅ NEW: fetch full details for selected recipes (works across pages)
+  const fetchSelectedRecipesDetails = async (ids = []) => {
+    if (!ids.length) {
+      setSelectedRecipesDetails([]);
+      setSelectedError(null);
+      return;
+    }
+
+    try {
+      setSelectedLoading(true);
+      setSelectedError(null);
+
+      const results = await Promise.all(
+        ids.map(async (id) => {
+          const res = await fetch(`${RECIPES_API_URL}${id}/`, {
+            headers: { accept: "application/json" },
+          });
+          if (!res.ok) throw new Error(`Failed to fetch recipe ${id}`);
+          const json = await res.json();
+          return json.data; // adjust if your backend returns recipe directly
+        }),
+      );
+
+      setSelectedRecipesDetails(results.filter(Boolean));
+    } catch (err) {
+      setSelectedError(err.message);
+    } finally {
+      setSelectedLoading(false);
     }
   };
 
@@ -130,14 +166,20 @@ const RecipeThemesDashboard = () => {
 
   const openModal = (mode, theme = null) => {
     setModalMode(mode);
+
     if (theme) {
+      const selectedIds = theme.recipes?.map((r) => r.id) || [];
       setCurrentTheme({
         id: theme.id,
         name: theme.name,
         image_url: theme.image_url,
         color: theme.color,
-        recipes_id: theme.recipes?.map((r) => r.id) || [],
+        recipes_id: selectedIds,
       });
+
+      // keep selected details in sync if user opens and immediately clicks selected tab
+      setSelectedRecipesDetails(theme.recipes || []);
+      setSelectedError(null);
     } else {
       setCurrentTheme({
         id: null,
@@ -146,9 +188,14 @@ const RecipeThemesDashboard = () => {
         color: 4279326582,
         recipes_id: [],
       });
+
+      setSelectedRecipesDetails([]);
+      setSelectedError(null);
     }
+
     setShowModal(true);
     setRecipeViewMode("all");
+    setRecipePage(1);
     fetchRecipes(1, "");
   };
 
@@ -162,6 +209,13 @@ const RecipeThemesDashboard = () => {
       recipes_id: [],
     });
     setRecipeViewMode("all");
+    setRecipeSearch("");
+    setRecipePage(1);
+
+    // reset selected details
+    setSelectedRecipesDetails([]);
+    setSelectedLoading(false);
+    setSelectedError(null);
   };
 
   const handleSubmit = (e) => {
@@ -171,15 +225,19 @@ const RecipeThemesDashboard = () => {
       : updateTheme(currentTheme);
   };
 
+  // ✅ UPDATED: keep selected list in sync when removing/adding while on selected tab
   const toggleRecipeSelection = (recipeId) => {
     setCurrentTheme((prev) => {
       const exists = prev.recipes_id.includes(recipeId);
-      return {
-        ...prev,
-        recipes_id: exists
-          ? prev.recipes_id.filter((id) => id !== recipeId)
-          : [...prev.recipes_id, recipeId],
-      };
+      const updatedIds = exists
+        ? prev.recipes_id.filter((id) => id !== recipeId)
+        : [...prev.recipes_id, recipeId];
+
+      if (recipeViewMode === "selected") {
+        fetchSelectedRecipesDetails(updatedIds);
+      }
+
+      return { ...prev, recipes_id: updatedIds };
     });
   };
 
@@ -187,11 +245,6 @@ const RecipeThemesDashboard = () => {
     return (
       "#" + ("00000000" + (color >>> 0).toString(16)).slice(-8).substring(2)
     );
-  };
-
-  // NEW: Function to get full recipe details for selected IDs
-  const getSelectedRecipesDetails = () => {
-    return recipes.filter((r) => currentTheme.recipes_id.includes(r.id));
   };
 
   const totalPages = Math.ceil(recipesCount / 20);
@@ -238,7 +291,7 @@ const RecipeThemesDashboard = () => {
         <div className="row g-4">
           {themes
             .filter((t) =>
-              t.name.toLowerCase().includes(searchTerm.toLowerCase())
+              t.name.toLowerCase().includes(searchTerm.toLowerCase()),
             )
             .map((theme) => (
               <div key={theme.id} className="col-md-4">
@@ -292,6 +345,7 @@ const RecipeThemesDashboard = () => {
                 </h5>
                 <button onClick={closeModal} className="btn-close" />
               </div>
+
               <div className="modal-body">
                 <form onSubmit={handleSubmit} className="vstack gap-3">
                   <div>
@@ -371,13 +425,13 @@ const RecipeThemesDashboard = () => {
                     </div>
                   </div>
 
-                  {/* NEW: Recipe Selection with Toggle */}
+                  {/* Recipe Selection with Toggle */}
                   <div>
                     <label className="form-label fw-semibold">
                       Select Recipes
                     </label>
 
-                    {/* NEW: Toggle Buttons */}
+                    {/* Toggle Buttons */}
                     <div className="btn-group w-100 mb-3" role="group">
                       <button
                         type="button"
@@ -386,7 +440,10 @@ const RecipeThemesDashboard = () => {
                             ? "btn-primary"
                             : "btn-outline-primary"
                         }`}
-                        onClick={() => setRecipeViewMode("selected")}
+                        onClick={() => {
+                          setRecipeViewMode("selected");
+                          fetchSelectedRecipesDetails(currentTheme.recipes_id);
+                        }}
                       >
                         Selected Recipes ({currentTheme.recipes_id.length})
                       </button>
@@ -403,12 +460,20 @@ const RecipeThemesDashboard = () => {
                       </button>
                     </div>
 
-                    {/* NEW: Selected Recipes View (Dropdown Style) */}
+                    {/* Selected Recipes View */}
                     {recipeViewMode === "selected" && (
                       <div className="border rounded p-3 bg-light">
-                        {currentTheme.recipes_id.length > 0 ? (
+                        {selectedLoading ? (
+                          <div className="text-center text-muted py-4">
+                            Loading selected recipes...
+                          </div>
+                        ) : selectedError ? (
+                          <div className="alert alert-danger">
+                            {selectedError}
+                          </div>
+                        ) : currentTheme.recipes_id.length > 0 ? (
                           <div className="vstack gap-2">
-                            {getSelectedRecipesDetails().map((recipe) => (
+                            {selectedRecipesDetails.map((recipe) => (
                               <div
                                 key={recipe.id}
                                 className="d-flex align-items-center gap-3 bg-white p-2 rounded border"
@@ -466,7 +531,10 @@ const RecipeThemesDashboard = () => {
                           <button
                             type="button"
                             className="btn btn-outline-secondary"
-                            onClick={() => fetchRecipes(1, recipeSearch)}
+                            onClick={() => {
+                              setRecipePage(1);
+                              fetchRecipes(1, recipeSearch);
+                            }}
                           >
                             <Search size={16} /> Search
                           </button>
@@ -491,7 +559,7 @@ const RecipeThemesDashboard = () => {
                           <div className="row g-3">
                             {recipes.map((r) => {
                               const selected = currentTheme.recipes_id.includes(
-                                r.id
+                                r.id,
                               );
                               return (
                                 <div key={r.id} className="col-md-3">
@@ -555,8 +623,9 @@ const RecipeThemesDashboard = () => {
                               className="btn btn-outline-secondary btn-sm"
                               disabled={recipePage <= 1}
                               onClick={() => {
-                                setRecipePage(recipePage - 1);
-                                fetchRecipes(recipePage - 1, recipeSearch);
+                                const next = recipePage - 1;
+                                setRecipePage(next);
+                                fetchRecipes(next, recipeSearch);
                               }}
                             >
                               Prev
@@ -569,8 +638,9 @@ const RecipeThemesDashboard = () => {
                               className="btn btn-outline-secondary btn-sm"
                               disabled={recipePage >= totalPages}
                               onClick={() => {
-                                setRecipePage(recipePage + 1);
-                                fetchRecipes(recipePage + 1, recipeSearch);
+                                const next = recipePage + 1;
+                                setRecipePage(next);
+                                fetchRecipes(next, recipeSearch);
                               }}
                             >
                               Next

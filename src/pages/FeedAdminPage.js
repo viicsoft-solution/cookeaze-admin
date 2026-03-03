@@ -8,24 +8,37 @@ const isVideoUrl = (url = "") =>
 const FeedAdminPage = () => {
   const [feed, setFeed] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [selectedVideo, setSelectedVideo] = useState(null); // for modal video
+  const [selectedVideo, setSelectedVideo] = useState(null);
 
-  const fetchFeed = async () => {
+  // ✅ Pagination state
+  const [page, setPage] = useState(1);
+  const [count, setCount] = useState(0);
+  const pageSize = 20; // adjust if your backend uses a different size
+
+  const totalPages = Math.max(1, Math.ceil(count / pageSize));
+
+  const fetchFeed = async (pageToLoad = 1) => {
     setLoading(true);
     try {
-      const res = await axiosInstance.get("/feed/");
+      const res = await axiosInstance.get(`/feed/?page=${pageToLoad}`);
       const results = res.data?.data?.results || [];
+      const totalCount = res.data?.data?.count || results.length;
+
       setFeed(results);
+      setCount(totalCount);
+      setPage(pageToLoad);
     } catch (err) {
       console.error("Failed to fetch feed:", err);
       setFeed([]);
+      setCount(0);
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchFeed();
+    fetchFeed(1);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleDelete = async (id) => {
@@ -33,16 +46,54 @@ const FeedAdminPage = () => {
     try {
       await axiosInstance.delete(`/feed/${id}/`);
       alert("Feed deleted successfully");
-      fetchFeed();
+
+      // ✅ if last item on a page was deleted, step back a page safely
+      const nextPage = feed.length === 1 && page > 1 ? page - 1 : page;
+
+      fetchFeed(nextPage);
     } catch (err) {
       console.error(err);
       alert("Failed to delete feed");
     }
   };
 
+  const goPrev = () => {
+    if (page <= 1) return;
+    fetchFeed(page - 1);
+  };
+
+  const goNext = () => {
+    if (page >= totalPages) return;
+    fetchFeed(page + 1);
+  };
+
   return (
     <div className="container mt-4">
-      <h2 className="fw-bold mb-4">Feed Admin (Comments & Media)</h2>
+      <div className="d-flex align-items-center justify-content-between mb-3">
+        <h2 className="fw-bold mb-0">Feed Admin (Comments & Media)</h2>
+
+        {/* ✅ Pagination controls (top) */}
+        <div className="d-flex align-items-center gap-2">
+          <button
+            className="btn btn-outline-secondary btn-sm"
+            onClick={goPrev}
+            disabled={loading || page <= 1}
+          >
+            Prev
+          </button>
+          <span className="small text-muted">
+            Page <strong>{page}</strong> of <strong>{totalPages}</strong>{" "}
+            {count ? `• ${count} total` : ""}
+          </span>
+          <button
+            className="btn btn-outline-secondary btn-sm"
+            onClick={goNext}
+            disabled={loading || page >= totalPages}
+          >
+            Next
+          </button>
+        </div>
+      </div>
 
       {loading ? (
         <div className="text-center py-5">
@@ -53,87 +104,85 @@ const FeedAdminPage = () => {
           />
         </div>
       ) : (
-        <div className="table-responsive shadow-sm rounded">
-          <table className="table align-middle">
-            <thead className="table-light">
-              <tr>
-                <th style={{ width: 60 }}>ID</th>
-                <th>Original Comment</th>
-                <th>Media</th>
-                <th>Author</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {feed.length === 0 ? (
+        <>
+          <div className="table-responsive shadow-sm rounded">
+            <table className="table align-middle mb-0">
+              <thead className="table-light">
                 <tr>
-                  <td colSpan="5" className="text-center text-muted py-4">
-                    No feed found
-                  </td>
+                  {/* ✅ removed ID column */}
+                  <th>Original Comment</th>
+                  <th>Media</th>
+                  <th>Author</th>
+                  <th style={{ width: 120 }}>Actions</th>
                 </tr>
-              ) : (
-                feed.map((item) => {
-                  const original = item.original_comment;
-                  const mediaUrl = original?.media_url || "";
+              </thead>
 
-                  return (
-                    <tr key={item.id}>
-                      <td>{item.id}</td>
+              <tbody>
+                {feed.length === 0 ? (
+                  <tr>
+                    <td colSpan="4" className="text-center text-muted py-4">
+                      No feed found
+                    </td>
+                  </tr>
+                ) : (
+                  feed.map((item) => {
+                    const original = item.original_comment;
+                    const mediaUrl = original?.media_url || "";
 
-                      <td>
-                        <div style={{ whiteSpace: "pre-wrap" }}>
-                          {original?.message || "No comment message"}
-                        </div>
-                        <small className="text-muted">
-                          {new Date(item.created_at).toLocaleString()}
-                        </small>
-                      </td>
+                    return (
+                      <tr key={item.id}>
+                        <td>
+                          <div style={{ whiteSpace: "pre-wrap" }}>
+                            {original?.message || "No comment message"}
+                          </div>
+                          <small className="text-muted">
+                            {new Date(item.created_at).toLocaleString()}
+                          </small>
+                        </td>
 
-                      {/* media column */}
-                      <td style={{ width: "280px" }}>
-                        {mediaUrl ? (
-                          isVideoUrl(mediaUrl) ? (
-                            <div className="position-relative">
-                              <video
+                        {/* Media column */}
+                        <td style={{ width: "280px" }}>
+                          {mediaUrl ? (
+                            isVideoUrl(mediaUrl) ? (
+                              <div className="position-relative">
+                                <video
+                                  src={mediaUrl}
+                                  muted
+                                  style={{
+                                    width: "100%",
+                                    maxHeight: 160,
+                                    objectFit: "cover",
+                                    borderRadius: 8,
+                                  }}
+                                  playsInline
+                                />
+                                <button
+                                  className="btn btn-sm btn-dark position-absolute top-50 start-50 translate-middle"
+                                  onClick={() => setSelectedVideo(mediaUrl)}
+                                  aria-label="Play video"
+                                >
+                                  ▶ Play
+                                </button>
+                              </div>
+                            ) : (
+                              <img
                                 src={mediaUrl}
-                                muted
+                                alt="Comment media"
                                 style={{
                                   width: "100%",
                                   maxHeight: 160,
                                   objectFit: "cover",
                                   borderRadius: 8,
                                 }}
-                                // keep controls hidden in table; modal will play
-                                playsInline
                               />
-                              <button
-                                className="btn btn-sm btn-dark position-absolute top-50 start-50 translate-middle"
-                                onClick={() => setSelectedVideo(mediaUrl)}
-                                aria-label="Play video"
-                              >
-                                ▶ Play
-                              </button>
-                            </div>
+                            )
                           ) : (
-                            <img
-                              src={mediaUrl}
-                              alt="Comment media"
-                              style={{
-                                width: "100%",
-                                maxHeight: 160,
-                                objectFit: "cover",
-                                borderRadius: 8,
-                              }}
-                            />
-                          )
-                        ) : (
-                          <div className="text-muted small">No media</div>
-                        )}
-                      </td>
+                            <div className="text-muted small">No media</div>
+                          )}
+                        </td>
 
-                      {/* Author column (replaced comments column) */}
-                      <td>
-                        <div className="d-flex justify-content-between align-items-center">
+                        {/* Author column */}
+                        <td>
                           <div className="d-flex align-items-center">
                             <img
                               src={
@@ -159,25 +208,48 @@ const FeedAdminPage = () => {
                               </small>
                             </div>
                           </div>
-                        </div>
-                      </td>
+                        </td>
 
-                      {/* delete button */}
-                      <td>
-                        <button
-                          onClick={() => handleDelete(item.id)}
-                          className="btn btn-sm btn-danger"
-                        >
-                          Delete
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
+                        {/* Actions */}
+                        <td>
+                          <button
+                            onClick={() => handleDelete(item.id)}
+                            className="btn btn-sm btn-danger"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {/* ✅ Pagination controls (bottom) */}
+          {totalPages > 1 && (
+            <div className="d-flex justify-content-center align-items-center gap-2 mt-3">
+              <button
+                className="btn btn-outline-secondary btn-sm"
+                onClick={goPrev}
+                disabled={loading || page <= 1}
+              >
+                Prev
+              </button>
+              <span className="small text-muted">
+                Page <strong>{page}</strong> of <strong>{totalPages}</strong>
+              </span>
+              <button
+                className="btn btn-outline-secondary btn-sm"
+                onClick={goNext}
+                disabled={loading || page >= totalPages}
+              >
+                Next
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       {/* Video modal */}

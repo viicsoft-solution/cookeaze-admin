@@ -21,6 +21,7 @@ const HomeSectionAdmin = () => {
   const [expandedId, setExpandedId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [editFormData, setEditFormData] = useState({});
+  const [deletedItemIds, setDeletedItemIds] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [newSection, setNewSection] = useState({
     type: "recipe_grid",
@@ -32,6 +33,9 @@ const HomeSectionAdmin = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [showConfirm, setShowConfirm] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
+
+  // ✅ NEW: track which item is being edited inside edit section
+  const [editingItemIndex, setEditingItemIndex] = useState(null);
 
   // Alert state
   const [alertMessage, setAlertMessage] = useState("");
@@ -162,8 +166,10 @@ const HomeSectionAdmin = () => {
       );
       setEditItemPreview(selected || null);
     } else {
-      setEditItemPreview(null);
+      // keep manual preview if we set it from existing section item
+      // (don’t force-null here)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editItem.item_id, editAvailableItems]);
 
   const showAlert = (message, type) => {
@@ -172,6 +178,30 @@ const HomeSectionAdmin = () => {
   };
 
   const isGraphicBanner = (type) => type === "graphic_banner";
+
+  const hexToArgbInt = (hex) => {
+    if (!hex) return parseInt("FFFF5733", 16);
+    hex = String(hex).replace("#", "").replace(/^0x/i, "");
+    if (hex.length === 6) hex = "FF" + hex;
+    return parseInt(hex, 16);
+  };
+
+  const normalizeCardColorToInt = (value) => {
+    if (value === null || value === undefined || value === "") return hexToArgbInt("#FF5733");
+    if (typeof value === "number" && !isNaN(value)) return value;
+    if (typeof value === "string") {
+      if (/^-?\d+$/.test(value)) return parseInt(value, 10);
+      return hexToArgbInt(value);
+    }
+    return hexToArgbInt("#FF5733");
+  };
+
+  const argbIntToHex = (argbInt) => {
+    const safeNum = normalizeCardColorToInt(argbInt);
+    if (isNaN(safeNum)) return "#FF5733";
+    const hex = (safeNum >>> 0).toString(16).padStart(8, "0");
+    return "#" + hex.slice(2);
+  };
 
   // ✅ Upload helpers
   const uploadNewBannerToCloudinary = async () => {
@@ -360,17 +390,6 @@ const HomeSectionAdmin = () => {
     setShowEditSelectModal(false);
   };
 
-  const hexToArgbInt = (hex) => {
-    hex = hex.replace("#", "");
-    if (hex.length === 6) hex = "FF" + hex;
-    return parseInt(hex, 16);
-  };
-
-  const argbIntToHex = (argbInt) => {
-    const hex = argbInt.toString(16).padStart(8, "0");
-    return "#" + hex.slice(2);
-  };
-
   // Create new section
   const createSection = async () => {
     if (!newSection.title.trim()) {
@@ -381,10 +400,18 @@ const HomeSectionAdmin = () => {
     try {
       setLoading(true);
       const payload = {
-        title: newSection.title,
+        title: newSection.title || "",
         type: newSection.type,
-        order: parseInt(newSection.order),
-        items: newSection.items,
+        order: parseInt(newSection.order) || 0,
+        items: newSection.items.map((item) => {
+          return {
+            item_type: item.item_type || "recipe",
+            item_id: parseInt(item.item_id) || 0,
+            card_color: typeof item.card_color === "number" ? item.card_color : normalizeCardColorToInt(item.card_color),
+            image_url: item.image_url || "",
+            link_url: item.link_url || ""
+          };
+        }),
       };
 
       const response = await fetch(`${API_BASE}/`, {
@@ -446,11 +473,35 @@ const HomeSectionAdmin = () => {
     try {
       setLoading(true);
       const payload = {
-        title: editFormData.title,
+        title: editFormData.title || "",
         type: editFormData.type,
-        order: parseInt(editFormData.order),
-        items: editFormData.items || [],
+        order: parseInt(editFormData.order) || 0,
+        items: (editFormData.items || []).map((item) => {
+          return {
+            item_type: item.item_type || "recipe",
+            item_id: parseInt(item.item_id) || 0,
+            card_color: typeof item.card_color === "number" ? item.card_color : normalizeCardColorToInt(item.card_color),
+            image_url: item.image_url || "",
+            link_url: item.link_url || ""
+          };
+        }),
       };
+
+      // ✅ Process buffered deletions first
+      if (deletedItemIds.length > 0) {
+        await Promise.all(
+          deletedItemIds.map((sid) =>
+            fetch(`${API_BASE}/${id}/remove-item/`, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                accept: "application/json",
+              },
+              body: JSON.stringify({ section_item_id: sid }),
+            })
+          )
+        );
+      }
 
       const response = await fetch(`${API_BASE}/${id}/`, {
         method: "PUT",
@@ -467,6 +518,10 @@ const HomeSectionAdmin = () => {
         await fetchSections();
         setEditingId(null);
         setEditFormData({});
+        setEditingItemIndex(null);
+        setShowEditItemForm(false);
+        setDeletedItemIds([]);
+
         setEditRecipesPage(1);
         setEditRecipesSearch("");
         setEditRecipesSearchInput("");
@@ -557,10 +612,10 @@ const HomeSectionAdmin = () => {
       if (newItem.link_url) item.link_url = newItem.link_url;
     }
 
-    setNewSection({
-      ...newSection,
-      items: [...newSection.items, item],
-    });
+    setNewSection((prev) => ({
+      ...prev,
+      items: [...prev.items, item],
+    }));
 
     setNewItem({
       item_type: "recipe",
@@ -579,7 +634,7 @@ const HomeSectionAdmin = () => {
     showAlert("Item added to section", "success");
   };
 
-  // Add item to section (edit)
+  // ✅ Add/update item in edit section
   const addItemToEditSection = () => {
     const isGraphicBannerSection = isGraphicBanner(editFormData.type);
 
@@ -614,9 +669,28 @@ const HomeSectionAdmin = () => {
       if (editItem.link_url) item.link_url = editItem.link_url;
     }
 
-    setEditFormData({
-      ...editFormData,
-      items: [...(editFormData.items || []), item],
+    if (editFormData.items && editingItemIndex !== null && editFormData.items[editingItemIndex]) {
+      // retain sectionItemId for backend update constraints
+      if (editFormData.items[editingItemIndex].section_item_id) {
+        item.section_item_id = editFormData.items[editingItemIndex].section_item_id;
+      }
+    }
+
+    setEditFormData((prev) => {
+      const prevItems = prev.items || [];
+
+      // ✅ If editing an existing item, replace it
+      if (editingItemIndex !== null) {
+        const updated = [...prevItems];
+        if (updated[editingItemIndex].section_item_id) {
+          item.section_item_id = updated[editingItemIndex].section_item_id;
+        }
+        updated[editingItemIndex] = item;
+        return { ...prev, items: updated };
+      }
+
+      // ✅ Otherwise add
+      return { ...prev, items: [...prevItems, item] };
     });
 
     setEditItem({
@@ -633,21 +707,47 @@ const HomeSectionAdmin = () => {
 
     setShowEditItemForm(false);
     setEditItemPreview(null);
-    showAlert("Item added to section", "success");
+    setEditingItemIndex(null);
+
+    showAlert(
+      editingItemIndex !== null ? "Item updated" : "Item added to section",
+      "success",
+    );
   };
 
-  const removeItemFromSection = (index) => {
-    setNewSection({
-      ...newSection,
-      items: newSection.items.filter((_, i) => i !== index),
-    });
+  const removeItemFromSection = (indexToRemove) => {
+    setNewSection((prev) => ({
+      ...prev,
+      items: prev.items.filter((_, i) => i !== indexToRemove),
+    }));
   };
 
-  const removeItemFromEditSection = (index) => {
-    setEditFormData({
-      ...editFormData,
-      items: editFormData.items.filter((_, i) => i !== index),
-    });
+  const removeItemFromEditSection = async (indexToRemove) => {
+    const itemToRemove = editFormData.items[indexToRemove];
+
+    if (itemToRemove && itemToRemove.section_item_id) {
+      // ✅ Queue it for deletion during Save instead of executing it instantly
+      setDeletedItemIds((prev) => [...prev, itemToRemove.section_item_id]);
+    }
+
+    setEditFormData((prev) => ({
+      ...prev,
+      items: (prev.items || []).filter((_, i) => i !== indexToRemove),
+    }));
+
+    // if user deletes the item currently being edited
+    if (editingItemIndex === indexToRemove) {
+      setEditingItemIndex(null);
+      setShowEditItemForm(false);
+      setEditItemPreview(null);
+      setEditItem({
+        item_type: "recipe",
+        item_id: "",
+        card_color: "#FF5733",
+        image_url: "",
+        link_url: "",
+      });
+    }
   };
 
   const filteredSections = sections.filter((section) => {
@@ -784,7 +884,7 @@ const HomeSectionAdmin = () => {
                 <div className="mb-3">
                   {newSection.items.map((item, idx) => (
                     <div
-                      key={idx}
+                      key={`${item.item_id ?? "noid"}-${item.card_color}-${idx}`}
                       className="card mb-2 p-3 d-flex flex-row justify-content-between align-items-center"
                     >
                       <div className="d-flex align-items-center gap-3">
@@ -903,10 +1003,9 @@ const HomeSectionAdmin = () => {
                         className="btn btn-sm btn-outline-primary w-100 text-start"
                       >
                         {newItem.item_id
-                          ? `${
-                              selectedItemPreview?.name ||
-                              selectedItemPreview?.themeName
-                            }`
+                          ? `${selectedItemPreview?.name ||
+                          selectedItemPreview?.themeName
+                          }`
                           : `Browse ${newItem.item_type}s...`}
                       </button>
                     </div>
@@ -993,7 +1092,7 @@ const HomeSectionAdmin = () => {
                       disabled={
                         isGraphicBanner(newSection.type)
                           ? !newItem.image_url ||
-                            (!newItem.item_id && !newItem.link_url)
+                          (!newItem.item_id && !newItem.link_url)
                           : !newItem.item_id
                       }
                     >
@@ -1092,11 +1191,7 @@ const HomeSectionAdmin = () => {
                 >
                   <div className="d-flex align-items-center gap-3 flex-grow-1">
                     <button className="btn btn-sm btn-light p-0">
-                      {expandedId === section.id ? (
-                        <ChevronUp />
-                      ) : (
-                        <ChevronDown />
-                      )}
+                      {expandedId === section.id ? <ChevronUp /> : <ChevronDown />}
                     </button>
                     <div>
                       <h5 className="mb-1">{section.title}</h5>
@@ -1116,26 +1211,32 @@ const HomeSectionAdmin = () => {
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
+
                         setEditingId(section.id);
+                        setEditingItemIndex(null);
+                        setDeletedItemIds([]);
+                        setShowEditItemForm(false);
+                        setEditItemPreview(null);
 
                         const editableItems =
-                          section.items?.map((item) => {
+                          section.items?.map((it) => {
+                            const cColor = it.card_color !== undefined ? it.card_color : it.cardColor;
                             const mappedItem = {
-                              item_type: item.item?.themeName
-                                ? "theme"
-                                : "recipe",
-                              card_color: item.cardColor || 0,
+                              item_type: it.item?.themeName ? "theme" : (it.itemType || "recipe"),
+                              card_color: normalizeCardColorToInt(cColor),
                             };
 
-                            if (item.item?.id)
-                              mappedItem.item_id = item.item.id;
-                            if (item.imageUrl)
-                              mappedItem.image_url = item.imageUrl;
+                            if (it.sectionItemId) {
+                              mappedItem.section_item_id = it.sectionItemId;
+                            }
 
-                            if (item.linkUrl)
-                              mappedItem.link_url = item.linkUrl;
-                            else if (item.link_url)
-                              mappedItem.link_url = item.link_url;
+                            if (it.item?.id) mappedItem.item_id = it.item.id;
+                            else if (typeof it.itemId === "number") mappedItem.item_id = it.itemId;
+
+                            if (it.imageUrl) mappedItem.image_url = it.imageUrl;
+
+                            if (it.linkUrl) mappedItem.link_url = it.linkUrl;
+                            else if (it.link_url) mappedItem.link_url = it.link_url;
 
                             return mappedItem;
                           }) || [];
@@ -1230,10 +1331,20 @@ const HomeSectionAdmin = () => {
                       {editFormData.items && editFormData.items.length > 0 && (
                         <div className="mb-3">
                           {editFormData.items.map((item, idx) => {
-                            const originalItem =
-                              section.items && section.items[idx]
-                                ? section.items[idx].item
-                                : null;
+                            let originalItem = null;
+                            if (section.items && section.items.length > 0) {
+                              const found = section.items.find((original) => {
+                                if (item.section_item_id && original.sectionItemId) {
+                                  return original.sectionItemId === item.section_item_id;
+                                }
+                                if (item.item_id && original.item?.id) {
+                                  return original.item.id === item.item_id;
+                                }
+                                return false;
+                              });
+                              if (found) originalItem = found.item;
+                            }
+
                             const displayName =
                               originalItem?.name ??
                               originalItem?.themeName ??
@@ -1242,7 +1353,7 @@ const HomeSectionAdmin = () => {
 
                             return (
                               <div
-                                key={idx}
+                                key={`${item.section_item_id ?? item.item_id ?? "noid"}-${idx}`}
                                 className="card mb-2 p-3 d-flex flex-row justify-content-between align-items-center"
                               >
                                 <div className="d-flex align-items-center gap-3">
@@ -1250,9 +1361,7 @@ const HomeSectionAdmin = () => {
                                     style={{
                                       width: "30px",
                                       height: "30px",
-                                      backgroundColor: argbIntToHex(
-                                        item.card_color,
-                                      ),
+                                      backgroundColor: argbIntToHex(item.card_color),
                                       border: "1px solid #ddd",
                                       borderRadius: "4px",
                                     }}
@@ -1279,29 +1388,52 @@ const HomeSectionAdmin = () => {
                                     {item.image_url && (
                                       <small className="text-muted d-block">
                                         Image:{" "}
-                                        <strong>
-                                          {item.image_url.slice(0, 40)}...
-                                        </strong>
+                                        <strong>{item.image_url.slice(0, 40)}...</strong>
                                       </small>
                                     )}
 
                                     {item.link_url && (
                                       <small className="text-muted d-block">
                                         Link:{" "}
-                                        <strong>
-                                          {item.link_url.slice(0, 40)}...
-                                        </strong>
+                                        <strong>{item.link_url.slice(0, 40)}...</strong>
                                       </small>
                                     )}
                                   </div>
                                 </div>
 
-                                <button
-                                  onClick={() => removeItemFromEditSection(idx)}
-                                  className="btn btn-sm btn-outline-danger"
-                                >
-                                  <Trash2 size={16} />
-                                </button>
+                                {/* ✅ NEW: Edit + Delete icons */}
+                                <div className="d-flex gap-2">
+                                  <button
+                                    onClick={() => {
+                                      setEditingItemIndex(idx);
+
+                                      setEditItem({
+                                        item_type: item.item_type || "recipe",
+                                        item_id: item.item_id?.toString() || "",
+                                        card_color: argbIntToHex(item.card_color),
+                                        image_url: item.image_url || "",
+                                        link_url: item.link_url || "",
+                                      });
+
+                                      // show preview from existing section item (instant)
+                                      setEditItemPreview(originalItem || null);
+
+                                      setShowEditItemForm(true);
+                                    }}
+                                    className="btn btn-sm btn-outline-primary"
+                                    title="Edit item"
+                                  >
+                                    <Edit2 size={16} />
+                                  </button>
+
+                                  <button
+                                    onClick={() => removeItemFromEditSection(idx)}
+                                    className="btn btn-sm btn-outline-danger"
+                                    title="Delete item"
+                                  >
+                                    <Trash2 size={16} />
+                                  </button>
+                                </div>
                               </div>
                             );
                           })}
@@ -1312,9 +1444,7 @@ const HomeSectionAdmin = () => {
                         <div className="card p-3 bg-light mb-3">
                           <div className="row g-3 mb-3">
                             <div className="col-12 col-md-4">
-                              <label className="form-label small">
-                                Item Type
-                              </label>
+                              <label className="form-label small">Item Type</label>
                               <select
                                 value={editItem.item_type}
                                 onChange={(e) => {
@@ -1335,40 +1465,30 @@ const HomeSectionAdmin = () => {
                             {/* ✅ Graphic banner upload (edit) */}
                             {isGraphicBanner(editFormData.type) && (
                               <div className="col-12">
-                                <label className="form-label small">
-                                  Banner Image
-                                </label>
+                                <label className="form-label small">Banner Image</label>
                                 <div className="d-flex gap-2 flex-wrap">
                                   <input
                                     type="file"
                                     accept="image/*,video/*"
                                     className="form-control form-control-sm"
                                     onChange={(e) =>
-                                      setEditBannerFile(
-                                        e.target.files?.[0] || null,
-                                      )
+                                      setEditBannerFile(e.target.files?.[0] || null)
                                     }
                                   />
                                   <button
                                     type="button"
                                     className="btn btn-sm btn-outline-primary"
                                     onClick={uploadEditBannerToCloudinary}
-                                    disabled={
-                                      uploadingEditBanner || !editBannerFile
-                                    }
+                                    disabled={uploadingEditBanner || !editBannerFile}
                                   >
-                                    {uploadingEditBanner
-                                      ? "Uploading..."
-                                      : "Upload"}
+                                    {uploadingEditBanner ? "Uploading..." : "Upload"}
                                   </button>
                                 </div>
 
                                 {editItem.image_url && (
                                   <small className="text-muted d-block mt-2">
                                     Uploaded:{" "}
-                                    <strong>
-                                      {editItem.image_url.slice(0, 60)}...
-                                    </strong>
+                                    <strong>{editItem.image_url.slice(0, 60)}...</strong>
                                   </small>
                                 )}
                               </div>
@@ -1385,7 +1505,7 @@ const HomeSectionAdmin = () => {
                                 className="btn btn-sm btn-outline-primary w-100 text-start"
                               >
                                 {editItem.item_id
-                                  ? `${editItemPreview?.name || editItemPreview?.themeName}`
+                                  ? `${editItemPreview?.name || editItemPreview?.themeName || "Selected"}`
                                   : `Browse ${editItem.item_type}s...`}
                               </button>
                             </div>
@@ -1413,9 +1533,7 @@ const HomeSectionAdmin = () => {
                             )}
 
                             <div className="col-12 col-md-2">
-                              <label className="form-label small">
-                                Card Color
-                              </label>
+                              <label className="form-label small">Card Color</label>
                               <input
                                 type="color"
                                 value={editItem.card_color}
@@ -1444,10 +1562,7 @@ const HomeSectionAdmin = () => {
                                 {editItemPreview.image_url && (
                                   <img
                                     src={editItemPreview.image_url}
-                                    alt={
-                                      editItemPreview.name ||
-                                      editItemPreview.themeName
-                                    }
+                                    alt={editItemPreview.name || editItemPreview.themeName}
                                     style={{
                                       width: "100px",
                                       height: "100px",
@@ -1462,12 +1577,13 @@ const HomeSectionAdmin = () => {
                                 )}
                                 <div className="flex-grow-1">
                                   <p className="mb-1 fw-bold">
-                                    {editItemPreview.name ||
-                                      editItemPreview.themeName}
+                                    {editItemPreview.name || editItemPreview.themeName}
                                   </p>
-                                  <p className="mb-1 small text-muted">
-                                    ID: {editItemPreview.id}
-                                  </p>
+                                  {editItemPreview.id && (
+                                    <p className="mb-1 small text-muted">
+                                      ID: {editItemPreview.id}
+                                    </p>
+                                  )}
                                 </div>
                               </div>
                             </div>
@@ -1480,16 +1596,18 @@ const HomeSectionAdmin = () => {
                               disabled={
                                 isGraphicBanner(editFormData.type)
                                   ? !editItem.image_url ||
-                                    (!editItem.item_id && !editItem.link_url)
+                                  (!editItem.item_id && !editItem.link_url)
                                   : !editItem.item_id
                               }
                             >
-                              <Save size={16} className="me-1" /> Add Item
+                              <Save size={16} className="me-1" />{" "}
+                              {editingItemIndex !== null ? "Save Item" : "Add Item"}
                             </button>
 
                             <button
                               onClick={() => {
                                 setShowEditItemForm(false);
+                                setEditingItemIndex(null);
                                 setEditItem({
                                   item_type: "recipe",
                                   item_id: "",
@@ -1510,7 +1628,18 @@ const HomeSectionAdmin = () => {
                         </div>
                       ) : (
                         <button
-                          onClick={() => setShowEditItemForm(true)}
+                          onClick={() => {
+                            setShowEditItemForm(true);
+                            setEditingItemIndex(null);
+                            setEditItem({
+                              item_type: "recipe",
+                              item_id: "",
+                              card_color: "#FF5733",
+                              image_url: "",
+                              link_url: "",
+                            });
+                            setEditItemPreview(null);
+                          }}
                           className="btn btn-sm btn-outline-primary mb-3"
                         >
                           <Plus size={16} className="me-1" /> Add Item
@@ -1532,7 +1661,9 @@ const HomeSectionAdmin = () => {
                         onClick={() => {
                           setEditingId(null);
                           setEditFormData({});
+                          setDeletedItemIds([]);
                           setShowEditItemForm(false);
+                          setEditingItemIndex(null);
                           setEditItem({
                             item_type: "recipe",
                             item_id: "",
@@ -1566,7 +1697,10 @@ const HomeSectionAdmin = () => {
                       </p>
                     ) : (
                       section.items.map((item, idx) => (
-                        <div key={idx} className="card mb-2">
+                        <div
+                          key={`${item.sectionItemId ?? "sid"}-${item.item?.id ?? "iid"}-${idx}`}
+                          className="card mb-2"
+                        >
                           <div className="card-body d-flex justify-content-between align-items-start p-3">
                             <div className="d-flex align-items-center gap-3">
                               {item.item?.image_url && (
@@ -1585,19 +1719,17 @@ const HomeSectionAdmin = () => {
                                   }}
                                 />
                               )}
-                              {item.cardColor && (
+                              {(item.cardColor !== undefined && item.cardColor !== null) || (item.card_color !== undefined && item.card_color !== null) ? (
                                 <div
                                   style={{
                                     width: "30px",
                                     height: "30px",
-                                    backgroundColor: argbIntToHex(
-                                      item.cardColor,
-                                    ),
+                                    backgroundColor: argbIntToHex(item.card_color !== undefined ? item.card_color : item.cardColor),
                                     border: "1px solid #ddd",
                                     borderRadius: "4px",
                                   }}
                                 />
-                              )}
+                              ) : null}
                               <div>
                                 <p className="mb-1 fw-bold">
                                   {item.item?.name ||
@@ -1620,10 +1752,7 @@ const HomeSectionAdmin = () => {
                                 {(item.linkUrl || item.link_url) && (
                                   <p className="mb-0 small text-muted">
                                     Link:{" "}
-                                    {(item.linkUrl || item.link_url).slice(
-                                      0,
-                                      50,
-                                    )}
+                                    {(item.linkUrl || item.link_url).slice(0, 50)}
                                     ...
                                   </p>
                                 )}
@@ -1695,9 +1824,7 @@ const HomeSectionAdmin = () => {
                           type="text"
                           placeholder="Search by name..."
                           value={recipesSearchInput}
-                          onChange={(e) =>
-                            setRecipesSearchInput(e.target.value)
-                          }
+                          onChange={(e) => setRecipesSearchInput(e.target.value)}
                           onKeyPress={(e) => {
                             if (e.key === "Enter") handleRecipesSearch();
                           }}
@@ -1731,10 +1858,7 @@ const HomeSectionAdmin = () => {
                           <div
                             className="card cursor-pointer"
                             onClick={() => selectItemFromModal(item)}
-                            style={{
-                              cursor: "pointer",
-                              transition: "all 0.2s",
-                            }}
+                            style={{ cursor: "pointer", transition: "all 0.2s" }}
                             onMouseEnter={(e) => {
                               e.currentTarget.style.transform = "scale(1.02)";
                               e.currentTarget.style.boxShadow =
@@ -1764,12 +1888,8 @@ const HomeSectionAdmin = () => {
                                   />
                                 )}
                                 <div className="flex-grow-1">
-                                  <h6 className="mb-1">
-                                    {item.name || item.themeName}
-                                  </h6>
-                                  <p className="mb-0 small text-muted">
-                                    ID: {item.id}
-                                  </p>
+                                  <h6 className="mb-1">{item.name || item.themeName}</h6>
+                                  <p className="mb-0 small text-muted">ID: {item.id}</p>
                                   {item.description && (
                                     <p className="mb-0 small text-secondary mt-1">
                                       {item.description.slice(0, 100)}
@@ -1788,9 +1908,7 @@ const HomeSectionAdmin = () => {
                   {newItem.item_type === "recipe" && recipesTotalPages > 1 && (
                     <div className="d-flex justify-content-center align-items-center gap-3 mt-4">
                       <button
-                        onClick={() =>
-                          setRecipesPage((prev) => Math.max(1, prev - 1))
-                        }
+                        onClick={() => setRecipesPage((prev) => Math.max(1, prev - 1))}
                         disabled={recipesPage === 1}
                         className="btn btn-outline-secondary"
                       >
@@ -1801,9 +1919,7 @@ const HomeSectionAdmin = () => {
                       </span>
                       <button
                         onClick={() =>
-                          setRecipesPage((prev) =>
-                            Math.min(recipesTotalPages, prev + 1),
-                          )
+                          setRecipesPage((prev) => Math.min(recipesTotalPages, prev + 1))
                         }
                         disabled={recipesPage === recipesTotalPages}
                         className="btn btn-outline-secondary"
@@ -1838,8 +1954,7 @@ const HomeSectionAdmin = () => {
               <div className="modal-content">
                 <div className="modal-header">
                   <h5 className="modal-title">
-                    Select{" "}
-                    {editItem.item_type === "recipe" ? "Recipe" : "Theme"}
+                    Select {editItem.item_type === "recipe" ? "Recipe" : "Theme"}
                   </h5>
                   <button
                     type="button"
@@ -1855,9 +1970,7 @@ const HomeSectionAdmin = () => {
                           type="text"
                           placeholder="Search by name..."
                           value={editRecipesSearchInput}
-                          onChange={(e) =>
-                            setEditRecipesSearchInput(e.target.value)
-                          }
+                          onChange={(e) => setEditRecipesSearchInput(e.target.value)}
                           onKeyPress={(e) => {
                             if (e.key === "Enter") handleEditRecipesSearch();
                           }}
@@ -1891,10 +2004,7 @@ const HomeSectionAdmin = () => {
                           <div
                             className="card cursor-pointer"
                             onClick={() => selectEditItemFromModal(item)}
-                            style={{
-                              cursor: "pointer",
-                              transition: "all 0.2s",
-                            }}
+                            style={{ cursor: "pointer", transition: "all 0.2s" }}
                             onMouseEnter={(e) => {
                               e.currentTarget.style.transform = "scale(1.02)";
                               e.currentTarget.style.boxShadow =
@@ -1924,12 +2034,8 @@ const HomeSectionAdmin = () => {
                                   />
                                 )}
                                 <div className="flex-grow-1">
-                                  <h6 className="mb-1">
-                                    {item.name || item.themeName}
-                                  </h6>
-                                  <p className="mb-0 small text-muted">
-                                    ID: {item.id}
-                                  </p>
+                                  <h6 className="mb-1">{item.name || item.themeName}</h6>
+                                  <p className="mb-0 small text-muted">ID: {item.id}</p>
                                   {item.description && (
                                     <p className="mb-0 small text-secondary mt-1">
                                       {item.description.slice(0, 100)}
@@ -1945,34 +2051,33 @@ const HomeSectionAdmin = () => {
                     </div>
                   )}
 
-                  {editItem.item_type === "recipe" &&
-                    editRecipesTotalPages > 1 && (
-                      <div className="d-flex justify-content-center align-items-center gap-3 mt-4">
-                        <button
-                          onClick={() =>
-                            setEditRecipesPage((prev) => Math.max(1, prev - 1))
-                          }
-                          disabled={editRecipesPage === 1}
-                          className="btn btn-outline-secondary"
-                        >
-                          <ChevronLeft size={18} />
-                        </button>
-                        <span>
-                          Page {editRecipesPage} of {editRecipesTotalPages}
-                        </span>
-                        <button
-                          onClick={() =>
-                            setEditRecipesPage((prev) =>
-                              Math.min(editRecipesTotalPages, prev + 1),
-                            )
-                          }
-                          disabled={editRecipesPage === editRecipesTotalPages}
-                          className="btn btn-outline-secondary"
-                        >
-                          <ChevronRight size={18} />
-                        </button>
-                      </div>
-                    )}
+                  {editItem.item_type === "recipe" && editRecipesTotalPages > 1 && (
+                    <div className="d-flex justify-content-center align-items-center gap-3 mt-4">
+                      <button
+                        onClick={() =>
+                          setEditRecipesPage((prev) => Math.max(1, prev - 1))
+                        }
+                        disabled={editRecipesPage === 1}
+                        className="btn btn-outline-secondary"
+                      >
+                        <ChevronLeft size={18} />
+                      </button>
+                      <span>
+                        Page {editRecipesPage} of {editRecipesTotalPages}
+                      </span>
+                      <button
+                        onClick={() =>
+                          setEditRecipesPage((prev) =>
+                            Math.min(editRecipesTotalPages, prev + 1),
+                          )
+                        }
+                        disabled={editRecipesPage === editRecipesTotalPages}
+                        className="btn btn-outline-secondary"
+                      >
+                        <ChevronRight size={18} />
+                      </button>
+                    </div>
+                  )}
                 </div>
                 <div className="modal-footer">
                   <button
