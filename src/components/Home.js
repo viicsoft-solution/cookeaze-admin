@@ -476,15 +476,19 @@ const HomeSectionAdmin = () => {
         title: editFormData.title || "",
         type: editFormData.type,
         order: parseInt(editFormData.order) || 0,
-        items: (editFormData.items || []).map((item) => {
-          return {
-            item_type: item.item_type || "recipe",
-            item_id: parseInt(item.item_id) || 0,
-            card_color: typeof item.card_color === "number" ? item.card_color : normalizeCardColorToInt(item.card_color),
-            image_url: item.image_url || "",
-            link_url: item.link_url || ""
-          };
-        }),
+items: (editFormData.items || []).map((item) => {
+  const mappedItem = {
+    item_type: item.item_type || "recipe",
+    card_color: typeof item.card_color === "number"
+      ? item.card_color
+      : normalizeCardColorToInt(item.card_color),
+  };
+  // ✅ Only include item_id if it's a valid non-zero value
+  if (item.item_id) mappedItem.item_id = parseInt(item.item_id);
+  if (item.image_url) mappedItem.image_url = item.image_url;
+  if (item.link_url) mappedItem.link_url = item.link_url;
+  return mappedItem;
+}),
       };
 
       // ✅ Process buffered deletions first
