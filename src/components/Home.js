@@ -34,7 +34,6 @@ const HomeSectionAdmin = () => {
   const [showConfirm, setShowConfirm] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
 
-  // ✅ NEW: track which item is being edited inside edit section
   const [editingItemIndex, setEditingItemIndex] = useState(null);
 
   // Alert state
@@ -89,7 +88,7 @@ const HomeSectionAdmin = () => {
   const [editRecipesSearch, setEditRecipesSearch] = useState("");
   const [editRecipesSearchInput, setEditRecipesSearchInput] = useState("");
 
-  // ✅ Cloudinary upload states (create + edit)
+  // Cloudinary upload states (create + edit)
   const [newBannerFile, setNewBannerFile] = useState(null);
   const [editBannerFile, setEditBannerFile] = useState(null);
   const [uploadingNewBanner, setUploadingNewBanner] = useState(false);
@@ -165,9 +164,6 @@ const HomeSectionAdmin = () => {
         (item) => item.id === parseInt(editItem.item_id),
       );
       setEditItemPreview(selected || null);
-    } else {
-      // keep manual preview if we set it from existing section item
-      // (don’t force-null here)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editItem.item_id, editAvailableItems]);
@@ -187,7 +183,8 @@ const HomeSectionAdmin = () => {
   };
 
   const normalizeCardColorToInt = (value) => {
-    if (value === null || value === undefined || value === "") return hexToArgbInt("#FF5733");
+    if (value === null || value === undefined || value === "")
+      return hexToArgbInt("#FF5733");
     if (typeof value === "number" && !isNaN(value)) return value;
     if (typeof value === "string") {
       if (/^-?\d+$/.test(value)) return parseInt(value, 10);
@@ -196,14 +193,25 @@ const HomeSectionAdmin = () => {
     return hexToArgbInt("#FF5733");
   };
 
+  // ✅ Returns null for null/undefined/0 so callers can hide the swatch
   const argbIntToHex = (argbInt) => {
+    if (argbInt === null || argbInt === undefined || argbInt === 0) return null;
     const safeNum = normalizeCardColorToInt(argbInt);
-    if (isNaN(safeNum)) return "#FF5733";
+    if (isNaN(safeNum)) return null;
     const hex = (safeNum >>> 0).toString(16).padStart(8, "0");
     return "#" + hex.slice(2);
   };
 
-  // ✅ Upload helpers
+  // ✅ Always returns a number for the API payload — never null/undefined.
+  //    Uses 0 as "no color" sentinel so the backend never wipes a stored
+  //    color when only order/title changes.
+  const safeCardColorInt = (value) => {
+    if (value === null || value === undefined) return 0;
+    if (typeof value === "number" && !isNaN(value)) return value;
+    return normalizeCardColorToInt(value);
+  };
+
+  // Upload helpers
   const uploadNewBannerToCloudinary = async () => {
     if (!newBannerFile) {
       showAlert("Please choose a file first", "warning");
@@ -404,13 +412,15 @@ const HomeSectionAdmin = () => {
         type: newSection.type,
         order: parseInt(newSection.order) || 0,
         items: newSection.items.map((item) => {
-          return {
+          const mappedItem = {
             item_type: item.item_type || "recipe",
-            item_id: parseInt(item.item_id) || 0,
-            card_color: typeof item.card_color === "number" ? item.card_color : normalizeCardColorToInt(item.card_color),
-            image_url: item.image_url || "",
-            link_url: item.link_url || ""
+            // ✅ Always send card_color as a number — never omit it
+            card_color: safeCardColorInt(item.card_color),
           };
+          if (item.item_id) mappedItem.item_id = parseInt(item.item_id);
+          if (item.image_url) mappedItem.image_url = item.image_url;
+          if (item.link_url) mappedItem.link_url = item.link_url;
+          return mappedItem;
         }),
       };
 
@@ -446,11 +456,8 @@ const HomeSectionAdmin = () => {
         setRecipesPage(1);
         setRecipesSearch("");
         setRecipesSearchInput("");
-
-        // reset cloudinary file states
         setNewBannerFile(null);
         setUploadingNewBanner(false);
-
         showAlert("Section created successfully", "success");
       } else {
         showAlert(data.message || "Failed to create section", "danger");
@@ -476,22 +483,22 @@ const HomeSectionAdmin = () => {
         title: editFormData.title || "",
         type: editFormData.type,
         order: parseInt(editFormData.order) || 0,
-items: (editFormData.items || []).map((item) => {
-  const mappedItem = {
-    item_type: item.item_type || "recipe",
-    card_color: typeof item.card_color === "number"
-      ? item.card_color
-      : normalizeCardColorToInt(item.card_color),
-  };
-  // ✅ Only include item_id if it's a valid non-zero value
-  if (item.item_id) mappedItem.item_id = parseInt(item.item_id);
-  if (item.image_url) mappedItem.image_url = item.image_url;
-  if (item.link_url) mappedItem.link_url = item.link_url;
-  return mappedItem;
-}),
+        // ✅ Always send card_color as a number so the backend never wipes
+        //    a stored color when only the order/title changes.
+        //    safeCardColorInt returns 0 for null (meaning "no color").
+        items: (editFormData.items || []).map((item) => {
+          const mappedItem = {
+            item_type: item.item_type || "recipe",
+            card_color: safeCardColorInt(item.card_color),
+          };
+          if (item.item_id) mappedItem.item_id = parseInt(item.item_id);
+          if (item.image_url) mappedItem.image_url = item.image_url;
+          if (item.link_url) mappedItem.link_url = item.link_url;
+          return mappedItem;
+        }),
       };
 
-      // ✅ Process buffered deletions first
+      // Process buffered deletions first
       if (deletedItemIds.length > 0) {
         await Promise.all(
           deletedItemIds.map((sid) =>
@@ -502,8 +509,8 @@ items: (editFormData.items || []).map((item) => {
                 accept: "application/json",
               },
               body: JSON.stringify({ section_item_id: sid }),
-            })
-          )
+            }),
+          ),
         );
       }
 
@@ -525,15 +532,11 @@ items: (editFormData.items || []).map((item) => {
         setEditingItemIndex(null);
         setShowEditItemForm(false);
         setDeletedItemIds([]);
-
         setEditRecipesPage(1);
         setEditRecipesSearch("");
         setEditRecipesSearchInput("");
-
-        // reset edit upload states
         setEditBannerFile(null);
         setUploadingEditBanner(false);
-
         showAlert("Section updated successfully", "success");
       } else {
         showAlert(data.message || "Failed to update section", "danger");
@@ -628,17 +631,14 @@ items: (editFormData.items || []).map((item) => {
       image_url: "",
       link_url: "",
     });
-
-    // reset upload file
     setNewBannerFile(null);
     setUploadingNewBanner(false);
-
     setShowItemForm(false);
     setSelectedItemPreview(null);
     showAlert("Item added to section", "success");
   };
 
-  // ✅ Add/update item in edit section
+  // Add/update item in edit section
   const addItemToEditSection = () => {
     const isGraphicBannerSection = isGraphicBanner(editFormData.type);
 
@@ -673,17 +673,20 @@ items: (editFormData.items || []).map((item) => {
       if (editItem.link_url) item.link_url = editItem.link_url;
     }
 
-    if (editFormData.items && editingItemIndex !== null && editFormData.items[editingItemIndex]) {
-      // retain sectionItemId for backend update constraints
+    if (
+      editFormData.items &&
+      editingItemIndex !== null &&
+      editFormData.items[editingItemIndex]
+    ) {
       if (editFormData.items[editingItemIndex].section_item_id) {
-        item.section_item_id = editFormData.items[editingItemIndex].section_item_id;
+        item.section_item_id =
+          editFormData.items[editingItemIndex].section_item_id;
       }
     }
 
     setEditFormData((prev) => {
       const prevItems = prev.items || [];
 
-      // ✅ If editing an existing item, replace it
       if (editingItemIndex !== null) {
         const updated = [...prevItems];
         if (updated[editingItemIndex].section_item_id) {
@@ -693,7 +696,6 @@ items: (editFormData.items || []).map((item) => {
         return { ...prev, items: updated };
       }
 
-      // ✅ Otherwise add
       return { ...prev, items: [...prevItems, item] };
     });
 
@@ -704,11 +706,8 @@ items: (editFormData.items || []).map((item) => {
       image_url: "",
       link_url: "",
     });
-
-    // reset upload file
     setEditBannerFile(null);
     setUploadingEditBanner(false);
-
     setShowEditItemForm(false);
     setEditItemPreview(null);
     setEditingItemIndex(null);
@@ -730,7 +729,6 @@ items: (editFormData.items || []).map((item) => {
     const itemToRemove = editFormData.items[indexToRemove];
 
     if (itemToRemove && itemToRemove.section_item_id) {
-      // ✅ Queue it for deletion during Save instead of executing it instantly
       setDeletedItemIds((prev) => [...prev, itemToRemove.section_item_id]);
     }
 
@@ -739,7 +737,6 @@ items: (editFormData.items || []).map((item) => {
       items: (prev.items || []).filter((_, i) => i !== indexToRemove),
     }));
 
-    // if user deletes the item currently being edited
     if (editingItemIndex === indexToRemove) {
       setEditingItemIndex(null);
       setShowEditItemForm(false);
@@ -886,58 +883,71 @@ items: (editFormData.items || []).map((item) => {
 
               {newSection.items.length > 0 && (
                 <div className="mb-3">
-                  {newSection.items.map((item, idx) => (
-                    <div
-                      key={`${item.item_id ?? "noid"}-${item.card_color}-${idx}`}
-                      className="card mb-2 p-3 d-flex flex-row justify-content-between align-items-center"
-                    >
-                      <div className="d-flex align-items-center gap-3">
-                        <div
-                          style={{
-                            width: "30px",
-                            height: "30px",
-                            backgroundColor: argbIntToHex(item.card_color),
-                            border: "1px solid #ddd",
-                            borderRadius: "4px",
-                          }}
-                        />
-                        <div>
-                          <small className="text-muted d-block">
-                            Type: <strong>{item.item_type}</strong>
-                            {item.item_id && (
-                              <>
-                                {" "}
-                                | ID: <strong>{item.item_id}</strong>
-                              </>
-                            )}
-                            {" | Color: "}
-                            <strong>{item.card_color}</strong>
-                          </small>
-
-                          {item.image_url && (
-                            <small className="text-muted d-block">
-                              Image:{" "}
-                              <strong>{item.image_url.slice(0, 50)}...</strong>
-                            </small>
-                          )}
-
-                          {item.link_url && (
-                            <small className="text-muted d-block">
-                              Link:{" "}
-                              <strong>{item.link_url.slice(0, 50)}...</strong>
-                            </small>
-                          )}
-                        </div>
-                      </div>
-
-                      <button
-                        onClick={() => removeItemFromSection(idx)}
-                        className="btn btn-sm btn-outline-danger"
+                  {newSection.items.map((item, idx) => {
+                    const swatchColor = argbIntToHex(item.card_color);
+                    return (
+                      <div
+                        key={`${item.item_id ?? "noid"}-${item.card_color}-${idx}`}
+                        className="card mb-2 p-3 d-flex flex-row justify-content-between align-items-center"
                       >
-                        <Trash2 size={16} />
-                      </button>
-                    </div>
-                  ))}
+                        <div className="d-flex align-items-center gap-3">
+                          {swatchColor && (
+                            <div
+                              style={{
+                                width: "30px",
+                                height: "30px",
+                                backgroundColor: swatchColor,
+                                border: "1px solid #ddd",
+                                borderRadius: "4px",
+                              }}
+                            />
+                          )}
+                          <div>
+                            <small className="text-muted d-block">
+                              Type: <strong>{item.item_type}</strong>
+                              {item.item_id && (
+                                <>
+                                  {" "}
+                                  | ID: <strong>{item.item_id}</strong>
+                                </>
+                              )}
+                              {item.card_color !== null &&
+                                item.card_color !== undefined &&
+                                item.card_color !== 0 && (
+                                  <>
+                                    {" "}
+                                    | Color: <strong>{item.card_color}</strong>
+                                  </>
+                                )}
+                            </small>
+
+                            {item.image_url && (
+                              <small className="text-muted d-block">
+                                Image:{" "}
+                                <strong>
+                                  {item.image_url.slice(0, 50)}...
+                                </strong>
+                              </small>
+                            )}
+
+                            {item.link_url && (
+                              <small className="text-muted d-block">
+                                Link:{" "}
+                                <strong>{item.link_url.slice(0, 50)}...</strong>
+                              </small>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={() => removeItemFromSection(idx)}
+                          className="btn btn-sm btn-outline-danger"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
 
@@ -963,7 +973,6 @@ items: (editFormData.items || []).map((item) => {
                       </select>
                     </div>
 
-                    {/* ✅ Graphic Banner: File picker + upload button */}
                     {isGraphicBanner(newSection.type) && (
                       <div className="col-12">
                         <label className="form-label small">Banner Image</label>
@@ -986,7 +995,6 @@ items: (editFormData.items || []).map((item) => {
                           </button>
                         </div>
 
-                        {/* show uploaded url */}
                         {newItem.image_url && (
                           <small className="text-muted d-block mt-2">
                             Uploaded:{" "}
@@ -1007,9 +1015,7 @@ items: (editFormData.items || []).map((item) => {
                         className="btn btn-sm btn-outline-primary w-100 text-start"
                       >
                         {newItem.item_id
-                          ? `${selectedItemPreview?.name ||
-                          selectedItemPreview?.themeName
-                          }`
+                          ? `${selectedItemPreview?.name || selectedItemPreview?.themeName}`
                           : `Browse ${newItem.item_type}s...`}
                       </button>
                     </div>
@@ -1096,7 +1102,7 @@ items: (editFormData.items || []).map((item) => {
                       disabled={
                         isGraphicBanner(newSection.type)
                           ? !newItem.image_url ||
-                          (!newItem.item_id && !newItem.link_url)
+                            (!newItem.item_id && !newItem.link_url)
                           : !newItem.item_id
                       }
                     >
@@ -1114,8 +1120,6 @@ items: (editFormData.items || []).map((item) => {
                           link_url: "",
                         });
                         setSelectedItemPreview(null);
-
-                        // reset upload state
                         setNewBannerFile(null);
                         setUploadingNewBanner(false);
                       }}
@@ -1162,7 +1166,6 @@ items: (editFormData.items || []).map((item) => {
                     link_url: "",
                   });
                   setSelectedItemPreview(null);
-
                   setNewBannerFile(null);
                   setUploadingNewBanner(false);
                 }}
@@ -1195,7 +1198,11 @@ items: (editFormData.items || []).map((item) => {
                 >
                   <div className="d-flex align-items-center gap-3 flex-grow-1">
                     <button className="btn btn-sm btn-light p-0">
-                      {expandedId === section.id ? <ChevronUp /> : <ChevronDown />}
+                      {expandedId === section.id ? (
+                        <ChevronUp />
+                      ) : (
+                        <ChevronDown />
+                      )}
                     </button>
                     <div>
                       <h5 className="mb-1">{section.title}</h5>
@@ -1224,10 +1231,23 @@ items: (editFormData.items || []).map((item) => {
 
                         const editableItems =
                           section.items?.map((it) => {
-                            const cColor = it.card_color !== undefined ? it.card_color : it.cardColor;
+                            const cColor =
+                              it.card_color !== undefined
+                                ? it.card_color
+                                : it.cardColor;
                             const mappedItem = {
-                              item_type: it.item?.themeName ? "theme" : (it.itemType || "recipe"),
-                              card_color: normalizeCardColorToInt(cColor),
+                              item_type: it.item?.themeName
+                                ? "theme"
+                                : it.itemType || "recipe",
+                              // ✅ Use 0 instead of null so safeCardColorInt
+                              //    always sends a number in the PUT payload,
+                              //    preventing the backend from wiping stored colors.
+                              card_color:
+                                cColor !== null && cColor !== undefined
+                                  ? typeof cColor === "number"
+                                    ? cColor
+                                    : normalizeCardColorToInt(cColor)
+                                  : 0,
                             };
 
                             if (it.sectionItemId) {
@@ -1235,19 +1255,19 @@ items: (editFormData.items || []).map((item) => {
                             }
 
                             if (it.item?.id) mappedItem.item_id = it.item.id;
-                            else if (typeof it.itemId === "number") mappedItem.item_id = it.itemId;
+                            else if (typeof it.itemId === "number")
+                              mappedItem.item_id = it.itemId;
 
                             if (it.imageUrl) mappedItem.image_url = it.imageUrl;
 
                             if (it.linkUrl) mappedItem.link_url = it.linkUrl;
-                            else if (it.link_url) mappedItem.link_url = it.link_url;
+                            else if (it.link_url)
+                              mappedItem.link_url = it.link_url;
 
                             return mappedItem;
                           }) || [];
 
                         setEditFormData({ ...section, items: editableItems });
-
-                        // reset edit upload state
                         setEditBannerFile(null);
                         setUploadingEditBanner(false);
                       }}
@@ -1338,8 +1358,14 @@ items: (editFormData.items || []).map((item) => {
                             let originalItem = null;
                             if (section.items && section.items.length > 0) {
                               const found = section.items.find((original) => {
-                                if (item.section_item_id && original.sectionItemId) {
-                                  return original.sectionItemId === item.section_item_id;
+                                if (
+                                  item.section_item_id &&
+                                  original.sectionItemId
+                                ) {
+                                  return (
+                                    original.sectionItemId ===
+                                    item.section_item_id
+                                  );
                                 }
                                 if (item.item_id && original.item?.id) {
                                   return original.item.id === item.item_id;
@@ -1355,21 +1381,25 @@ items: (editFormData.items || []).map((item) => {
                               item.item_name ??
                               "Unknown";
 
+                            const swatchColor = argbIntToHex(item.card_color);
+
                             return (
                               <div
                                 key={`${item.section_item_id ?? item.item_id ?? "noid"}-${idx}`}
                                 className="card mb-2 p-3 d-flex flex-row justify-content-between align-items-center"
                               >
                                 <div className="d-flex align-items-center gap-3">
-                                  <div
-                                    style={{
-                                      width: "30px",
-                                      height: "30px",
-                                      backgroundColor: argbIntToHex(item.card_color),
-                                      border: "1px solid #ddd",
-                                      borderRadius: "4px",
-                                    }}
-                                  />
+                                  {swatchColor && (
+                                    <div
+                                      style={{
+                                        width: "30px",
+                                        height: "30px",
+                                        backgroundColor: swatchColor,
+                                        border: "1px solid #ddd",
+                                        borderRadius: "4px",
+                                      }}
+                                    />
+                                  )}
                                   <div>
                                     <small className="text-muted d-block">
                                       Type: <strong>{item.item_type}</strong>
@@ -1379,8 +1409,15 @@ items: (editFormData.items || []).map((item) => {
                                           | ID: <strong>{item.item_id}</strong>
                                         </>
                                       )}
-                                      {" | Color: "}
-                                      <strong>{item.card_color}</strong>
+                                      {item.card_color !== null &&
+                                        item.card_color !== undefined &&
+                                        item.card_color !== 0 && (
+                                          <>
+                                            {" "}
+                                            | Color:{" "}
+                                            <strong>{item.card_color}</strong>
+                                          </>
+                                        )}
                                     </small>
 
                                     {item.item_id && (
@@ -1392,36 +1429,35 @@ items: (editFormData.items || []).map((item) => {
                                     {item.image_url && (
                                       <small className="text-muted d-block">
                                         Image:{" "}
-                                        <strong>{item.image_url.slice(0, 40)}...</strong>
+                                        <strong>
+                                          {item.image_url.slice(0, 40)}...
+                                        </strong>
                                       </small>
                                     )}
 
                                     {item.link_url && (
                                       <small className="text-muted d-block">
                                         Link:{" "}
-                                        <strong>{item.link_url.slice(0, 40)}...</strong>
+                                        <strong>
+                                          {item.link_url.slice(0, 40)}...
+                                        </strong>
                                       </small>
                                     )}
                                   </div>
                                 </div>
 
-                                {/* ✅ NEW: Edit + Delete icons */}
                                 <div className="d-flex gap-2">
                                   <button
                                     onClick={() => {
                                       setEditingItemIndex(idx);
-
                                       setEditItem({
                                         item_type: item.item_type || "recipe",
                                         item_id: item.item_id?.toString() || "",
-                                        card_color: argbIntToHex(item.card_color),
+                                        card_color: swatchColor || "#FF5733",
                                         image_url: item.image_url || "",
                                         link_url: item.link_url || "",
                                       });
-
-                                      // show preview from existing section item (instant)
                                       setEditItemPreview(originalItem || null);
-
                                       setShowEditItemForm(true);
                                     }}
                                     className="btn btn-sm btn-outline-primary"
@@ -1431,7 +1467,9 @@ items: (editFormData.items || []).map((item) => {
                                   </button>
 
                                   <button
-                                    onClick={() => removeItemFromEditSection(idx)}
+                                    onClick={() =>
+                                      removeItemFromEditSection(idx)
+                                    }
                                     className="btn btn-sm btn-outline-danger"
                                     title="Delete item"
                                   >
@@ -1448,7 +1486,9 @@ items: (editFormData.items || []).map((item) => {
                         <div className="card p-3 bg-light mb-3">
                           <div className="row g-3 mb-3">
                             <div className="col-12 col-md-4">
-                              <label className="form-label small">Item Type</label>
+                              <label className="form-label small">
+                                Item Type
+                              </label>
                               <select
                                 value={editItem.item_type}
                                 onChange={(e) => {
@@ -1466,33 +1506,42 @@ items: (editFormData.items || []).map((item) => {
                               </select>
                             </div>
 
-                            {/* ✅ Graphic banner upload (edit) */}
                             {isGraphicBanner(editFormData.type) && (
                               <div className="col-12">
-                                <label className="form-label small">Banner Image</label>
+                                <label className="form-label small">
+                                  Banner Image
+                                </label>
                                 <div className="d-flex gap-2 flex-wrap">
                                   <input
                                     type="file"
                                     accept="image/*,video/*"
                                     className="form-control form-control-sm"
                                     onChange={(e) =>
-                                      setEditBannerFile(e.target.files?.[0] || null)
+                                      setEditBannerFile(
+                                        e.target.files?.[0] || null,
+                                      )
                                     }
                                   />
                                   <button
                                     type="button"
                                     className="btn btn-sm btn-outline-primary"
                                     onClick={uploadEditBannerToCloudinary}
-                                    disabled={uploadingEditBanner || !editBannerFile}
+                                    disabled={
+                                      uploadingEditBanner || !editBannerFile
+                                    }
                                   >
-                                    {uploadingEditBanner ? "Uploading..." : "Upload"}
+                                    {uploadingEditBanner
+                                      ? "Uploading..."
+                                      : "Upload"}
                                   </button>
                                 </div>
 
                                 {editItem.image_url && (
                                   <small className="text-muted d-block mt-2">
                                     Uploaded:{" "}
-                                    <strong>{editItem.image_url.slice(0, 60)}...</strong>
+                                    <strong>
+                                      {editItem.image_url.slice(0, 60)}...
+                                    </strong>
                                   </small>
                                 )}
                               </div>
@@ -1537,7 +1586,9 @@ items: (editFormData.items || []).map((item) => {
                             )}
 
                             <div className="col-12 col-md-2">
-                              <label className="form-label small">Card Color</label>
+                              <label className="form-label small">
+                                Card Color
+                              </label>
                               <input
                                 type="color"
                                 value={editItem.card_color}
@@ -1566,7 +1617,10 @@ items: (editFormData.items || []).map((item) => {
                                 {editItemPreview.image_url && (
                                   <img
                                     src={editItemPreview.image_url}
-                                    alt={editItemPreview.name || editItemPreview.themeName}
+                                    alt={
+                                      editItemPreview.name ||
+                                      editItemPreview.themeName
+                                    }
                                     style={{
                                       width: "100px",
                                       height: "100px",
@@ -1581,7 +1635,8 @@ items: (editFormData.items || []).map((item) => {
                                 )}
                                 <div className="flex-grow-1">
                                   <p className="mb-1 fw-bold">
-                                    {editItemPreview.name || editItemPreview.themeName}
+                                    {editItemPreview.name ||
+                                      editItemPreview.themeName}
                                   </p>
                                   {editItemPreview.id && (
                                     <p className="mb-1 small text-muted">
@@ -1600,12 +1655,14 @@ items: (editFormData.items || []).map((item) => {
                               disabled={
                                 isGraphicBanner(editFormData.type)
                                   ? !editItem.image_url ||
-                                  (!editItem.item_id && !editItem.link_url)
+                                    (!editItem.item_id && !editItem.link_url)
                                   : !editItem.item_id
                               }
                             >
                               <Save size={16} className="me-1" />{" "}
-                              {editingItemIndex !== null ? "Save Item" : "Add Item"}
+                              {editingItemIndex !== null
+                                ? "Save Item"
+                                : "Add Item"}
                             </button>
 
                             <button
@@ -1620,7 +1677,6 @@ items: (editFormData.items || []).map((item) => {
                                   link_url: "",
                                 });
                                 setEditItemPreview(null);
-
                                 setEditBannerFile(null);
                                 setUploadingEditBanner(false);
                               }}
@@ -1679,7 +1735,6 @@ items: (editFormData.items || []).map((item) => {
                           setEditRecipesPage(1);
                           setEditRecipesSearch("");
                           setEditRecipesSearchInput("");
-
                           setEditBannerFile(null);
                           setUploadingEditBanner(false);
                         }}
@@ -1700,72 +1755,82 @@ items: (editFormData.items || []).map((item) => {
                         No items in this section
                       </p>
                     ) : (
-                      section.items.map((item, idx) => (
-                        <div
-                          key={`${item.sectionItemId ?? "sid"}-${item.item?.id ?? "iid"}-${idx}`}
-                          className="card mb-2"
-                        >
-                          <div className="card-body d-flex justify-content-between align-items-start p-3">
-                            <div className="d-flex align-items-center gap-3">
-                              {item.item?.image_url && (
-                                <img
-                                  src={item.item.image_url}
-                                  alt={item.item.name || item.item.themeName}
-                                  style={{
-                                    width: "60px",
-                                    height: "60px",
-                                    objectFit: "cover",
-                                    borderRadius: "6px",
-                                    border: "1px solid #ddd",
-                                  }}
-                                  onError={(e) => {
-                                    e.target.style.display = "none";
-                                  }}
-                                />
-                              )}
-                              {(item.cardColor !== undefined && item.cardColor !== null) || (item.card_color !== undefined && item.card_color !== null) ? (
-                                <div
-                                  style={{
-                                    width: "30px",
-                                    height: "30px",
-                                    backgroundColor: argbIntToHex(item.card_color !== undefined ? item.card_color : item.cardColor),
-                                    border: "1px solid #ddd",
-                                    borderRadius: "4px",
-                                  }}
-                                />
-                              ) : null}
-                              <div>
-                                <p className="mb-1 fw-bold">
-                                  {item.item?.name ||
-                                    item.item?.themeName ||
-                                    "Item #" + item.sectionItemId}
-                                </p>
-                                {item.item?.id && (
-                                  <p className="mb-0 small text-secondary">
-                                    ID: {item.item.id}
-                                  </p>
+                      section.items.map((item, idx) => {
+                        const rawColor =
+                          item.card_color !== undefined
+                            ? item.card_color
+                            : item.cardColor;
+                        const swatchColor = argbIntToHex(rawColor);
+                        return (
+                          <div
+                            key={`${item.sectionItemId ?? "sid"}-${item.item?.id ?? "iid"}-${idx}`}
+                            className="card mb-2"
+                          >
+                            <div className="card-body d-flex justify-content-between align-items-start p-3">
+                              <div className="d-flex align-items-center gap-3">
+                                {item.item?.image_url && (
+                                  <img
+                                    src={item.item.image_url}
+                                    alt={item.item.name || item.item.themeName}
+                                    style={{
+                                      width: "60px",
+                                      height: "60px",
+                                      objectFit: "cover",
+                                      borderRadius: "6px",
+                                      border: "1px solid #ddd",
+                                    }}
+                                    onError={(e) => {
+                                      e.target.style.display = "none";
+                                    }}
+                                  />
                                 )}
-                                <p className="mb-0 small text-muted">
-                                  Section Item ID: {item.sectionItemId}
-                                </p>
-                                {item.imageUrl && (
+                                {swatchColor && (
+                                  <div
+                                    style={{
+                                      width: "30px",
+                                      height: "30px",
+                                      backgroundColor: swatchColor,
+                                      border: "1px solid #ddd",
+                                      borderRadius: "4px",
+                                    }}
+                                  />
+                                )}
+                                <div>
+                                  <p className="mb-1 fw-bold">
+                                    {item.item?.name ||
+                                      item.item?.themeName ||
+                                      "Item #" + item.sectionItemId}
+                                  </p>
+                                  {item.item?.id && (
+                                    <p className="mb-0 small text-secondary">
+                                      ID: {item.item.id}
+                                    </p>
+                                  )}
                                   <p className="mb-0 small text-muted">
-                                    Image: {item.imageUrl.slice(0, 50)}...
+                                    Section Item ID: {item.sectionItemId}
                                   </p>
-                                )}
-                                {(item.linkUrl || item.link_url) && (
-                                  <p className="mb-0 small text-muted">
-                                    Link:{" "}
-                                    {(item.linkUrl || item.link_url).slice(0, 50)}
-                                    ...
-                                  </p>
-                                )}
+                                  {item.imageUrl && (
+                                    <p className="mb-0 small text-muted">
+                                      Image: {item.imageUrl.slice(0, 50)}...
+                                    </p>
+                                  )}
+                                  {(item.linkUrl || item.link_url) && (
+                                    <p className="mb-0 small text-muted">
+                                      Link:{" "}
+                                      {(item.linkUrl || item.link_url).slice(
+                                        0,
+                                        50,
+                                      )}
+                                      ...
+                                    </p>
+                                  )}
+                                </div>
                               </div>
+                              <span className="badge bg-success">Active</span>
                             </div>
-                            <span className="badge bg-success">Active</span>
                           </div>
-                        </div>
-                      ))
+                        );
+                      })
                     )}
                   </div>
                 )}
@@ -1828,7 +1893,9 @@ items: (editFormData.items || []).map((item) => {
                           type="text"
                           placeholder="Search by name..."
                           value={recipesSearchInput}
-                          onChange={(e) => setRecipesSearchInput(e.target.value)}
+                          onChange={(e) =>
+                            setRecipesSearchInput(e.target.value)
+                          }
                           onKeyPress={(e) => {
                             if (e.key === "Enter") handleRecipesSearch();
                           }}
@@ -1862,7 +1929,10 @@ items: (editFormData.items || []).map((item) => {
                           <div
                             className="card cursor-pointer"
                             onClick={() => selectItemFromModal(item)}
-                            style={{ cursor: "pointer", transition: "all 0.2s" }}
+                            style={{
+                              cursor: "pointer",
+                              transition: "all 0.2s",
+                            }}
                             onMouseEnter={(e) => {
                               e.currentTarget.style.transform = "scale(1.02)";
                               e.currentTarget.style.boxShadow =
@@ -1892,8 +1962,12 @@ items: (editFormData.items || []).map((item) => {
                                   />
                                 )}
                                 <div className="flex-grow-1">
-                                  <h6 className="mb-1">{item.name || item.themeName}</h6>
-                                  <p className="mb-0 small text-muted">ID: {item.id}</p>
+                                  <h6 className="mb-1">
+                                    {item.name || item.themeName}
+                                  </h6>
+                                  <p className="mb-0 small text-muted">
+                                    ID: {item.id}
+                                  </p>
                                   {item.description && (
                                     <p className="mb-0 small text-secondary mt-1">
                                       {item.description.slice(0, 100)}
@@ -1912,7 +1986,9 @@ items: (editFormData.items || []).map((item) => {
                   {newItem.item_type === "recipe" && recipesTotalPages > 1 && (
                     <div className="d-flex justify-content-center align-items-center gap-3 mt-4">
                       <button
-                        onClick={() => setRecipesPage((prev) => Math.max(1, prev - 1))}
+                        onClick={() =>
+                          setRecipesPage((prev) => Math.max(1, prev - 1))
+                        }
                         disabled={recipesPage === 1}
                         className="btn btn-outline-secondary"
                       >
@@ -1923,7 +1999,9 @@ items: (editFormData.items || []).map((item) => {
                       </span>
                       <button
                         onClick={() =>
-                          setRecipesPage((prev) => Math.min(recipesTotalPages, prev + 1))
+                          setRecipesPage((prev) =>
+                            Math.min(recipesTotalPages, prev + 1),
+                          )
                         }
                         disabled={recipesPage === recipesTotalPages}
                         className="btn btn-outline-secondary"
@@ -1958,7 +2036,8 @@ items: (editFormData.items || []).map((item) => {
               <div className="modal-content">
                 <div className="modal-header">
                   <h5 className="modal-title">
-                    Select {editItem.item_type === "recipe" ? "Recipe" : "Theme"}
+                    Select{" "}
+                    {editItem.item_type === "recipe" ? "Recipe" : "Theme"}
                   </h5>
                   <button
                     type="button"
@@ -1974,7 +2053,9 @@ items: (editFormData.items || []).map((item) => {
                           type="text"
                           placeholder="Search by name..."
                           value={editRecipesSearchInput}
-                          onChange={(e) => setEditRecipesSearchInput(e.target.value)}
+                          onChange={(e) =>
+                            setEditRecipesSearchInput(e.target.value)
+                          }
                           onKeyPress={(e) => {
                             if (e.key === "Enter") handleEditRecipesSearch();
                           }}
@@ -2008,7 +2089,10 @@ items: (editFormData.items || []).map((item) => {
                           <div
                             className="card cursor-pointer"
                             onClick={() => selectEditItemFromModal(item)}
-                            style={{ cursor: "pointer", transition: "all 0.2s" }}
+                            style={{
+                              cursor: "pointer",
+                              transition: "all 0.2s",
+                            }}
                             onMouseEnter={(e) => {
                               e.currentTarget.style.transform = "scale(1.02)";
                               e.currentTarget.style.boxShadow =
@@ -2038,8 +2122,12 @@ items: (editFormData.items || []).map((item) => {
                                   />
                                 )}
                                 <div className="flex-grow-1">
-                                  <h6 className="mb-1">{item.name || item.themeName}</h6>
-                                  <p className="mb-0 small text-muted">ID: {item.id}</p>
+                                  <h6 className="mb-1">
+                                    {item.name || item.themeName}
+                                  </h6>
+                                  <p className="mb-0 small text-muted">
+                                    ID: {item.id}
+                                  </p>
                                   {item.description && (
                                     <p className="mb-0 small text-secondary mt-1">
                                       {item.description.slice(0, 100)}
@@ -2055,33 +2143,34 @@ items: (editFormData.items || []).map((item) => {
                     </div>
                   )}
 
-                  {editItem.item_type === "recipe" && editRecipesTotalPages > 1 && (
-                    <div className="d-flex justify-content-center align-items-center gap-3 mt-4">
-                      <button
-                        onClick={() =>
-                          setEditRecipesPage((prev) => Math.max(1, prev - 1))
-                        }
-                        disabled={editRecipesPage === 1}
-                        className="btn btn-outline-secondary"
-                      >
-                        <ChevronLeft size={18} />
-                      </button>
-                      <span>
-                        Page {editRecipesPage} of {editRecipesTotalPages}
-                      </span>
-                      <button
-                        onClick={() =>
-                          setEditRecipesPage((prev) =>
-                            Math.min(editRecipesTotalPages, prev + 1),
-                          )
-                        }
-                        disabled={editRecipesPage === editRecipesTotalPages}
-                        className="btn btn-outline-secondary"
-                      >
-                        <ChevronRight size={18} />
-                      </button>
-                    </div>
-                  )}
+                  {editItem.item_type === "recipe" &&
+                    editRecipesTotalPages > 1 && (
+                      <div className="d-flex justify-content-center align-items-center gap-3 mt-4">
+                        <button
+                          onClick={() =>
+                            setEditRecipesPage((prev) => Math.max(1, prev - 1))
+                          }
+                          disabled={editRecipesPage === 1}
+                          className="btn btn-outline-secondary"
+                        >
+                          <ChevronLeft size={18} />
+                        </button>
+                        <span>
+                          Page {editRecipesPage} of {editRecipesTotalPages}
+                        </span>
+                        <button
+                          onClick={() =>
+                            setEditRecipesPage((prev) =>
+                              Math.min(editRecipesTotalPages, prev + 1),
+                            )
+                          }
+                          disabled={editRecipesPage === editRecipesTotalPages}
+                          className="btn btn-outline-secondary"
+                        >
+                          <ChevronRight size={18} />
+                        </button>
+                      </div>
+                    )}
                 </div>
                 <div className="modal-footer">
                   <button
