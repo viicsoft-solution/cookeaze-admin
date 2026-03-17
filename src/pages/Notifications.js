@@ -9,9 +9,14 @@ import {
   CheckCircle,
   AlertCircle,
   Loader,
+  Activity
 } from "lucide-react";
 import "bootstrap/dist/css/bootstrap.min.css";
 import { useAuth } from "../contexts/AuthProvider"; // <-- added
+import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
+import { Pie } from 'react-chartjs-2';
+
+ChartJS.register(ArcElement, Tooltip, Legend);
 
 const API_BASE = "https://api.cookeaze.app/api";
 // removed const AUTH_TOKEN
@@ -65,6 +70,18 @@ const NotificationAdmin = () => {
     setTimeout(() => {
       setNotification({ type: "", message: "" });
     }, 3500);
+  };
+
+  const handleTestStats = () => {
+    setDeliveryStats({
+      delivery: {
+        total_devices: 2450,
+        success_count: 2150,
+        failure_count: 300,
+        success_rate: 87.8
+      }
+    });
+    showNotification("success", "Showing mock data for UI testing.");
   };
 
   // helper to build auth headers and handle missing token
@@ -310,76 +327,110 @@ const NotificationAdmin = () => {
   const DeliveryStatsCard = ({ stats }) => {
     if (!stats) return null;
 
-    // Handle case where stats object doesn't match expected structure
-    if (!stats.delivery) {
-      return (
-        <div className="card mt-4 border-success">
-          <div className="card-header bg-success text-white d-flex align-items-center">
-            <CheckCircle size={20} className="me-2" />
-            Delivery Report
-          </div>
-          <div className="card-body">
-            <pre className="mb-0 bg-light p-3 rounded" style={{ fontSize: "0.85rem", whiteSpace: "pre-wrap" }}>
-              {JSON.stringify(stats, null, 2)}
-            </pre>
-          </div>
-        </div>
-      );
-    }
+    // The API might return these fields inside an object (e.g., stats.delivery) or at the top level
+    const data = stats.delivery || stats;
+
+    const total = data.total_devices ?? data.total ?? 0;
+    const success = data.success_count ?? data.success ?? 0;
+    const failure = data.failure_count ?? data.failure ?? (total - success) ?? 0;
+    const rate = data.success_rate ?? (total > 0 ? ((success / total) * 100).toFixed(1) : 0);
+
+    const chartData = {
+      labels: ["Success", "Failed"],
+      datasets: [
+        {
+          data: [success, failure],
+          backgroundColor: ["#198754", "#dc3545"],
+          hoverBackgroundColor: ["#157347", "#bb2d3b"],
+          borderWidth: 0,
+        },
+      ],
+    };
+
+    const chartOptions = {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: {
+          position: "bottom",
+          labels: {
+            usePointStyle: true,
+            padding: 20,
+          },
+        },
+        tooltip: {
+          callbacks: {
+            label: (context) => {
+              const label = context.label || '';
+              const value = context.raw || 0;
+              const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+              return `${label}: ${value} (${percentage}%)`;
+            }
+          }
+        }
+      },
+    };
 
     return (
-      <div className="card mt-4 border-primary">
-        <div className="card-header bg-primary text-white d-flex align-items-center">
-          <CheckCircle size={20} className="me-2" />
-          Delivery Report
+      <div className="card mt-4 border-0 shadow-sm" style={{ borderRadius: "16px", overflow: "hidden" }}>
+        <div className="card-header bg-white border-bottom-0 pt-4 pb-2 px-4 d-flex justify-content-between align-items-center">
+          <h5 className="mb-0 text-dark d-flex align-items-center fw-bold">
+            <Activity size={22} className="me-2 text-primary" />
+            Delivery Report Overview
+          </h5>
+          <button type="button" className="btn-close" aria-label="Close" onClick={() => setDeliveryStats(null)}></button>
         </div>
 
-        <div className="card-body">
-          <div className="row g-3 mb-3">
-            <div className="col-md-4">
-              <div className="card bg-light p-3 text-center">
-                <small>Total Devices</small>
-                <h4>{stats.delivery?.total_devices ?? "N/A"}</h4>
-              </div>
-            </div>
-            <div className="col-md-4">
-              <div className="card bg-light p-3 text-center">
-                <small>Success Count</small>
-                <h4 className="text-success">{stats.delivery?.success_count ?? "N/A"}</h4>
-              </div>
-            </div>
-            <div className="col-md-4">
-              <div className="card bg-light p-3 text-center">
-                <small>Success Rate</small>
-                <h4 className="text-primary">{stats.delivery?.success_rate ?? "N/A"}%</h4>
-              </div>
-            </div>
-          </div>
-
-          <div className="row g-3">
-            <div className="col-md-6">
-              <div className="card p-3">
-                <h6>Maintenance</h6>
-                <small>
-                  Inactive tokens removed:{" "}
-                  {stats.maintenance?.inactive_tokens_removed ?? "N/A"}
-                </small>
-                <br />
-                <small>
-                  Invalid tokens cleaned:{" "}
-                  {stats.maintenance?.invalid_tokens_cleaned ?? "N/A"}
-                </small>
+        <div className="card-body p-4 bg-white">
+          <div className="row g-4 align-items-center">
+            {/* Chart Section */}
+            <div className="col-12 col-md-5 col-lg-4 text-center">
+              <div style={{ height: "220px", width: "100%", position: "relative" }}>
+                {total > 0 ? (
+                  <Pie data={chartData} options={chartOptions} />
+                ) : (
+                  <div className="d-flex h-100 align-items-center justify-content-center text-muted flex-column">
+                    <AlertCircle size={40} className="mb-2 opacity-50" />
+                    <p className="mb-0">No data to display</p>
+                  </div>
+                )}
               </div>
             </div>
 
-            <div className="col-md-6">
-              <div className="card p-3">
-                <h6>Metadata</h6>
-                <small>ID: {stats.metadata?.notification_id ?? "N/A"}</small>
-                <br />
-                <small>
-                  {stats.metadata?.timestamp ? new Date(stats.metadata.timestamp).toLocaleString() : "N/A"}
-                </small>
+            {/* Stats Section */}
+            <div className="col-12 col-md-7 col-lg-8">
+              <div className="row g-3">
+                {/* Total Devices */}
+                <div className="col-6 col-sm-6">
+                  <div className="p-3 rounded-4 h-100 shadow-sm" style={{ background: "linear-gradient(145deg, #f8f9fa, #e9ecef)", border: "1px solid #dee2e6" }}>
+                    <div className="text-muted fw-bold mb-1" style={{ fontSize: "0.75rem", letterSpacing: "1px", textTransform: "uppercase" }}>Total Devices</div>
+                    <h3 className="mb-0 fw-bold text-secondary">{total.toLocaleString()}</h3>
+                  </div>
+                </div>
+
+                {/* Success Rate */}
+                <div className="col-6 col-sm-6">
+                  <div className="p-3 rounded-4 h-100 shadow-sm" style={{ background: "linear-gradient(145deg, #cce5ff, #b8daff)", border: "1px solid #b8daff" }}>
+                    <div className="text-primary fw-bold mb-1" style={{ fontSize: "0.75rem", letterSpacing: "1px", textTransform: "uppercase" }}>Success Rate</div>
+                    <h3 className="mb-0 fw-bold text-primary">{rate}%</h3>
+                  </div>
+                </div>
+
+                {/* Success Count */}
+                <div className="col-6 col-sm-6">
+                  <div className="p-3 rounded-4 h-100 shadow-sm" style={{ background: "linear-gradient(145deg, #d4edda, #c3e6cb)", border: "1px solid #c3e6cb" }}>
+                    <div className="text-success fw-bold mb-1" style={{ fontSize: "0.75rem", letterSpacing: "1px", textTransform: "uppercase" }}>Delivered</div>
+                    <h3 className="mb-0 fw-bold text-success">{success.toLocaleString()}</h3>
+                  </div>
+                </div>
+
+                {/* Failure Count */}
+                <div className="col-6 col-sm-6">
+                  <div className="p-3 rounded-4 h-100 shadow-sm" style={{ background: "linear-gradient(145deg, #f8d7da, #f5c6cb)", border: "1px solid #f5c6cb" }}>
+                    <div className="text-danger fw-bold mb-1" style={{ fontSize: "0.75rem", letterSpacing: "1px", textTransform: "uppercase" }}>Failed</div>
+                    <h3 className="mb-0 fw-bold text-danger">{failure.toLocaleString()}</h3>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -696,9 +747,18 @@ const NotificationAdmin = () => {
                   </div>
 
                   {/* Submit */}
-                  <button className="btn btn-danger w-100" disabled={loading}>
-                    {loading ? "Sending..." : "Send Broadcast"}
-                  </button>
+                  <div className="d-flex gap-2">
+                    <button className="btn btn-danger flex-grow-1" disabled={loading}>
+                      {loading ? "Sending..." : "Send Broadcast"}
+                    </button>
+                    <button 
+                      type="button" 
+                      className="btn btn-outline-secondary"
+                      onClick={handleTestStats}
+                    >
+                      Test UI
+                    </button>
+                  </div>
 
                   <DeliveryStatsCard stats={deliveryStats} />
                 </form>
@@ -772,9 +832,18 @@ const NotificationAdmin = () => {
                     />
                   </div>
 
-                  <button className="btn btn-danger w-100" disabled={loading}>
-                    {loading ? "Sending..." : "Send Meal Reminder"}
-                  </button>
+                  <div className="d-flex gap-2">
+                    <button className="btn btn-danger flex-grow-1" disabled={loading}>
+                      {loading ? "Sending..." : "Send Meal Reminder"}
+                    </button>
+                    <button 
+                      type="button" 
+                      className="btn btn-outline-secondary"
+                      onClick={handleTestStats}
+                    >
+                      Test UI
+                    </button>
+                  </div>
 
                   <DeliveryStatsCard stats={deliveryStats} />
                 </form>
@@ -901,9 +970,18 @@ const NotificationAdmin = () => {
                   </div>
 
                   {/* Submit */}
-                  <button className="btn btn-danger w-100" disabled={loading}>
-                    {loading ? "Sending..." : "Send Recipe Notification"}
-                  </button>
+                  <div className="d-flex gap-2">
+                    <button className="btn btn-danger flex-grow-1" disabled={loading}>
+                      {loading ? "Sending..." : "Send Recipe Notification"}
+                    </button>
+                    <button 
+                      type="button" 
+                      className="btn btn-outline-secondary"
+                      onClick={handleTestStats}
+                    >
+                      Test UI
+                    </button>
+                  </div>
 
                   <DeliveryStatsCard stats={deliveryStats} />
                 </form>
