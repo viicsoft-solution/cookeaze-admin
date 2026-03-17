@@ -72,18 +72,6 @@ const NotificationAdmin = () => {
     }, 3500);
   };
 
-  const handleTestStats = () => {
-    setDeliveryStats({
-      delivery: {
-        total_devices: 2450,
-        success_count: 2150,
-        failure_count: 300,
-        success_rate: 87.8
-      }
-    });
-    showNotification("success", "Showing mock data for UI testing.");
-  };
-
   // helper to build auth headers and handle missing token
   const getAuthHeaders = () => {
     if (!token) return null; // caller should handle null (not authenticated)
@@ -747,18 +735,9 @@ const NotificationAdmin = () => {
                   </div>
 
                   {/* Submit */}
-                  <div className="d-flex gap-2">
-                    <button className="btn btn-danger flex-grow-1" disabled={loading}>
-                      {loading ? "Sending..." : "Send Broadcast"}
-                    </button>
-                    <button 
-                      type="button" 
-                      className="btn btn-outline-secondary"
-                      onClick={handleTestStats}
-                    >
-                      Test UI
-                    </button>
-                  </div>
+                  <button className="btn btn-danger w-100" disabled={loading}>
+                    {loading ? "Sending..." : "Send Broadcast"}
+                  </button>
 
                   <DeliveryStatsCard stats={deliveryStats} />
                 </form>
@@ -832,18 +811,9 @@ const NotificationAdmin = () => {
                     />
                   </div>
 
-                  <div className="d-flex gap-2">
-                    <button className="btn btn-danger flex-grow-1" disabled={loading}>
-                      {loading ? "Sending..." : "Send Meal Reminder"}
-                    </button>
-                    <button 
-                      type="button" 
-                      className="btn btn-outline-secondary"
-                      onClick={handleTestStats}
-                    >
-                      Test UI
-                    </button>
-                  </div>
+                  <button className="btn btn-danger w-100" disabled={loading}>
+                    {loading ? "Sending..." : "Send Meal Reminder"}
+                  </button>
 
                   <DeliveryStatsCard stats={deliveryStats} />
                 </form>
@@ -970,18 +940,9 @@ const NotificationAdmin = () => {
                   </div>
 
                   {/* Submit */}
-                  <div className="d-flex gap-2">
-                    <button className="btn btn-danger flex-grow-1" disabled={loading}>
-                      {loading ? "Sending..." : "Send Recipe Notification"}
-                    </button>
-                    <button 
-                      type="button" 
-                      className="btn btn-outline-secondary"
-                      onClick={handleTestStats}
-                    >
-                      Test UI
-                    </button>
-                  </div>
+                  <button className="btn btn-danger w-100" disabled={loading}>
+                    {loading ? "Sending..." : "Send Recipe Notification"}
+                  </button>
 
                   <DeliveryStatsCard stats={deliveryStats} />
                 </form>
