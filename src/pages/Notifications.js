@@ -310,6 +310,23 @@ const NotificationAdmin = () => {
   const DeliveryStatsCard = ({ stats }) => {
     if (!stats) return null;
 
+    // Handle case where stats object doesn't match expected structure
+    if (!stats.delivery) {
+      return (
+        <div className="card mt-4 border-success">
+          <div className="card-header bg-success text-white d-flex align-items-center">
+            <CheckCircle size={20} className="me-2" />
+            Delivery Report
+          </div>
+          <div className="card-body">
+            <pre className="mb-0 bg-light p-3 rounded" style={{ fontSize: "0.85rem", whiteSpace: "pre-wrap" }}>
+              {JSON.stringify(stats, null, 2)}
+            </pre>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="card mt-4 border-primary">
         <div className="card-header bg-primary text-white d-flex align-items-center">
@@ -322,19 +339,19 @@ const NotificationAdmin = () => {
             <div className="col-md-4">
               <div className="card bg-light p-3 text-center">
                 <small>Total Devices</small>
-                <h4>{stats.delivery.total_devices}</h4>
+                <h4>{stats.delivery?.total_devices ?? "N/A"}</h4>
               </div>
             </div>
             <div className="col-md-4">
               <div className="card bg-light p-3 text-center">
                 <small>Success Count</small>
-                <h4 className="text-success">{stats.delivery.success_count}</h4>
+                <h4 className="text-success">{stats.delivery?.success_count ?? "N/A"}</h4>
               </div>
             </div>
             <div className="col-md-4">
               <div className="card bg-light p-3 text-center">
                 <small>Success Rate</small>
-                <h4 className="text-primary">{stats.delivery.success_rate}%</h4>
+                <h4 className="text-primary">{stats.delivery?.success_rate ?? "N/A"}%</h4>
               </div>
             </div>
           </div>
@@ -345,12 +362,12 @@ const NotificationAdmin = () => {
                 <h6>Maintenance</h6>
                 <small>
                   Inactive tokens removed:{" "}
-                  {stats.maintenance.inactive_tokens_removed}
+                  {stats.maintenance?.inactive_tokens_removed ?? "N/A"}
                 </small>
                 <br />
                 <small>
                   Invalid tokens cleaned:{" "}
-                  {stats.maintenance.invalid_tokens_cleaned}
+                  {stats.maintenance?.invalid_tokens_cleaned ?? "N/A"}
                 </small>
               </div>
             </div>
@@ -358,10 +375,10 @@ const NotificationAdmin = () => {
             <div className="col-md-6">
               <div className="card p-3">
                 <h6>Metadata</h6>
-                <small>ID: {stats.metadata.notification_id}</small>
+                <small>ID: {stats.metadata?.notification_id ?? "N/A"}</small>
                 <br />
                 <small>
-                  {new Date(stats.metadata.timestamp).toLocaleString()}
+                  {stats.metadata?.timestamp ? new Date(stats.metadata.timestamp).toLocaleString() : "N/A"}
                 </small>
               </div>
             </div>
