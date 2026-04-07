@@ -40,6 +40,8 @@ import AdminUsersPage from "./pages/UsersPage";
 import AdminChangePasswordPage from "./pages/ChangePasswordPage";
 import AdminChangeRolePage from "./pages/ChangeRolePage";
 
+import AiUsageStatsPage from "./pages/AiUsageStatsPage";
+
 // small helper for "/" route to preserve your existing logic
 function LoginOrRedirect() {
   const { token } = useAuth();
@@ -69,6 +71,14 @@ function AppRoutes() {
             element={
               <PrivateRoute>
                 <RecipeList />
+              </PrivateRoute>
+            }
+          />
+          <Route
+            path="/ai"
+            element={
+              <PrivateRoute>
+                <AiUsageStatsPage />
               </PrivateRoute>
             }
           />

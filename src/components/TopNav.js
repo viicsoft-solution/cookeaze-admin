@@ -84,6 +84,7 @@ export default function TopNav() {
                 Create Advert
               </Link>
             </li>
+
             <li className="nav-item">
               <Link className="nav-link" to="/categories">
                 Categories
@@ -119,8 +120,8 @@ export default function TopNav() {
                     </Link>
                   </li>
                   <li>
-                    <Link className="dropdown-item" to="/users">
-                      Manage Users
+                    <Link className="dropdown-item" to="/ai">
+                     Gemini Stat
                     </Link>
                   </li>
                   <li>
