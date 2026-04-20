@@ -1,14 +1,16 @@
 // src/App.js
 import React from "react";
+import "./App.css";
 import {
   BrowserRouter as Router,
   Routes,
   Route,
   Navigate,
+  useLocation,
 } from "react-router-dom";
 
 import { AuthProvider, useAuth } from "./contexts/AuthProvider";
-import TopNav from "./components/TopNav";
+import Sidebar from "./components/Sidebar";
 import PrivateRoute from "./PrivateRoute";
 
 // your existing components
@@ -41,6 +43,9 @@ import AdminChangePasswordPage from "./pages/ChangePasswordPage";
 import AdminChangeRolePage from "./pages/ChangeRolePage";
 
 import AiUsageStatsPage from "./pages/AiUsageStatsPage";
+import ImageLibrary from "./pages/Imagelibrary";
+import CreatorsPage from "./pages/CreatorsPage";
+import CreatorDetailPage from "./pages/CreatorDetailPage";
 
 // small helper for "/" route to preserve your existing logic
 function LoginOrRedirect() {
@@ -49,210 +54,249 @@ function LoginOrRedirect() {
 }
 
 function AppRoutes() {
+  const location = useLocation();
+  const { token } = useAuth();
+  const isImageLib = location.pathname === "/imagelib";
+
   return (
     <>
-      <TopNav />
+      <Sidebar />
 
-      <div className="container py-4">
-        <Routes>
-          <Route path="/" element={<LoginOrRedirect />} />
+      <div className={token ? "app-layout" : ""}>
+        {/* Push content area beside the sidebar when authenticated */}
+        <main
+          className={
+            token
+              ? `app-content${isImageLib ? " app-content--fullwidth" : ""}`
+              : ""
+          }
+        >
+          <Routes>
+            <Route path="/" element={<LoginOrRedirect />} />
 
-          <Route
-            path="/home"
-            element={
-              <PrivateRoute>
-                <Home />
-              </PrivateRoute>
-            }
-          />
+            <Route
+              path="/home"
+              element={
+                <PrivateRoute>
+                  <Home />
+                </PrivateRoute>
+              }
+            />
 
-          <Route
-            path="/recipe"
-            element={
-              <PrivateRoute>
-                <RecipeList />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/ai"
-            element={
-              <PrivateRoute>
-                <AiUsageStatsPage />
-              </PrivateRoute>
-            }
-          />
+            <Route
+              path="/recipe"
+              element={
+                <PrivateRoute>
+                  <RecipeList />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/ai"
+              element={
+                <PrivateRoute>
+                  <AiUsageStatsPage />
+                </PrivateRoute>
+              }
+            />
 
-          {/* Recipes */}
-          <Route
-            path="/recipe-theme"
-            element={
-              <PrivateRoute>
-                <RecipeThemesDashboard />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/create-recipe"
-            element={
-              <PrivateRoute>
-                <RecipeCreate />
-              </PrivateRoute>
-            }
-          />
+            <Route
+              path="/imagelib"
+              element={
+                <PrivateRoute>
+                  <ImageLibrary />
+                </PrivateRoute>
+              }
+            />
 
-          <Route
-            path="/notifications"
-            element={
-              <PrivateRoute>
-                <NotificationAdmin />
-              </PrivateRoute>
-            }
-          />
+            {/* Recipes */}
+            <Route
+              path="/recipe-theme"
+              element={
+                <PrivateRoute>
+                  <RecipeThemesDashboard />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/create-recipe"
+              element={
+                <PrivateRoute>
+                  <RecipeCreate />
+                </PrivateRoute>
+              }
+            />
 
-          <Route
-            path="/recipe/:id"
-            element={
-              <PrivateRoute>
-                <RecipeDetail />
-              </PrivateRoute>
-            }
-          />
+            <Route
+              path="/notifications"
+              element={
+                <PrivateRoute>
+                  <NotificationAdmin />
+                </PrivateRoute>
+              }
+            />
 
-          {/* Adverts */}
-          <Route
-            path="/adverts"
-            element={
-              <PrivateRoute>
-                <AdvertsList />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/adverts/create"
-            element={
-              <PrivateRoute>
-                <AdvertForm mode="create" />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/users"
-            element={
-              <PrivateRoute>
-                <AdminUsersPage />
-              </PrivateRoute>
-            }
-          />
+            <Route
+              path="/recipe/:id"
+              element={
+                <PrivateRoute>
+                  <RecipeDetail />
+                </PrivateRoute>
+              }
+            />
 
-          <Route
-            path="/change-password"
-            element={
-              <PrivateRoute>
-                <AdminChangePasswordPage />
-              </PrivateRoute>
-            }
-          />
+            {/* Adverts */}
+            <Route
+              path="/adverts"
+              element={
+                <PrivateRoute>
+                  <AdvertsList />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/adverts/create"
+              element={
+                <PrivateRoute>
+                  <AdvertForm mode="create" />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/users"
+              element={
+                <PrivateRoute>
+                  <AdminUsersPage />
+                </PrivateRoute>
+              }
+            />
 
-          <Route
-            path="/change-role"
-            element={
-              <PrivateRoute>
-                <AdminChangeRolePage />
-              </PrivateRoute>
-            }
-          />
+            <Route
+              path="/creators"
+              element={
+                <PrivateRoute>
+                  <CreatorsPage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/creators/:id"
+              element={
+                <PrivateRoute>
+                  <CreatorDetailPage />
+                </PrivateRoute>
+              }
+            />
 
-          <Route
-            path="/adverts/:id"
-            element={
-              <PrivateRoute>
-                <AdvertDetail />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/adverts/:id/edit"
-            element={
-              <PrivateRoute>
-                <AdvertForm mode="edit" />
-              </PrivateRoute>
-            }
-          />
+            <Route
+              path="/change-password"
+              element={
+                <PrivateRoute>
+                  <AdminChangePasswordPage />
+                </PrivateRoute>
+              }
+            />
 
-          {/* Categories */}
-          <Route
-            path="/categories"
-            element={
-              <PrivateRoute>
-                <CategoriesList />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/categories/create"
-            element={
-              <PrivateRoute>
-                <CategoryForm />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/categories/:id"
-            element={
-              <PrivateRoute>
-                <CategoryDetail />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/categories/:id/edit"
-            element={
-              <PrivateRoute>
-                <CategoryForm />
-              </PrivateRoute>
-            }
-          />
+            <Route
+              path="/change-role"
+              element={
+                <PrivateRoute>
+                  <AdminChangeRolePage />
+                </PrivateRoute>
+              }
+            />
 
-          {/* Admin */}
-          <Route
-            path="/admin"
-            element={
-              <PrivateRoute>
-                <AdminDashboard />
-              </PrivateRoute>
-            }
-          />
+            <Route
+              path="/adverts/:id"
+              element={
+                <PrivateRoute>
+                  <AdvertDetail />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/adverts/:id/edit"
+              element={
+                <PrivateRoute>
+                  <AdvertForm mode="edit" />
+                </PrivateRoute>
+              }
+            />
 
-          {/* Feed */}
-          <Route
-            path="/feed"
-            element={
-              <PrivateRoute>
-                <FeedListPage />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/feed/:id"
-            element={
-              <PrivateRoute>
-                <FeedDetailPage />
-              </PrivateRoute>
-            }
-          />
-          <Route
-            path="/feed-admin"
-            element={
-              <PrivateRoute>
-                <FeedAdminPage />
-              </PrivateRoute>
-            }
-          />
+            {/* Categories */}
+            <Route
+              path="/categories"
+              element={
+                <PrivateRoute>
+                  <CategoriesList />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/categories/create"
+              element={
+                <PrivateRoute>
+                  <CategoryForm />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/categories/:id"
+              element={
+                <PrivateRoute>
+                  <CategoryDetail />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/categories/:id/edit"
+              element={
+                <PrivateRoute>
+                  <CategoryForm />
+                </PrivateRoute>
+              }
+            />
 
-          {/* catch-all */}
-          <Route path="*" element={<Navigate to="/" />} />
-        </Routes>
+            {/* Admin */}
+            <Route
+              path="/admin"
+              element={
+                <PrivateRoute>
+                  <AdminDashboard />
+                </PrivateRoute>
+              }
+            />
+
+            {/* Feed */}
+            <Route
+              path="/feed"
+              element={
+                <PrivateRoute>
+                  <FeedListPage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/feed/:id"
+              element={
+                <PrivateRoute>
+                  <FeedDetailPage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/feed-admin"
+              element={
+                <PrivateRoute>
+                  <FeedAdminPage />
+                </PrivateRoute>
+              }
+            />
+
+            {/* catch-all */}
+            <Route path="*" element={<Navigate to="/" />} />
+          </Routes>
+        </main>
       </div>
     </>
   );
@@ -269,3 +313,4 @@ function App() {
 }
 
 export default App;
+

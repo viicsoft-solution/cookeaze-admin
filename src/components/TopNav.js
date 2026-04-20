@@ -59,6 +59,12 @@ export default function TopNav() {
             </li>
 
             <li className="nav-item">
+              <Link className="nav-link" to="/imagelib">
+            imagelib
+              </Link>
+            </li>
+
+            <li className="nav-item">
               <Link className="nav-link" to="/notifications">
                 CookEaze Notification
               </Link>
@@ -121,7 +127,7 @@ export default function TopNav() {
                   </li>
                   <li>
                     <Link className="dropdown-item" to="/ai">
-                     Gemini Stat
+                      Gemini Stat
                     </Link>
                   </li>
                   <li>
