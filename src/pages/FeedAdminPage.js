@@ -10,6 +10,11 @@ const FeedAdminPage = () => {
   const [loading, setLoading] = useState(true);
   const [selectedVideo, setSelectedVideo] = useState(null);
 
+  // Edit state
+  const [editingFeed, setEditingFeed] = useState(null);
+  const [editForm, setEditForm] = useState({ message: "", media_url: "" });
+  const [editLoading, setEditLoading] = useState(false);
+
   // ✅ Pagination state
   const [page, setPage] = useState(1);
   const [count, setCount] = useState(0);
@@ -54,6 +59,50 @@ const FeedAdminPage = () => {
     } catch (err) {
       console.error(err);
       alert("Failed to delete feed");
+    }
+  };
+
+  const openEditModal = (item) => {
+    setEditingFeed(item);
+    setEditForm({
+      message: item.original_comment?.message || "",
+      media_url: item.original_comment?.media_url || "",
+    });
+  };
+
+  const handleEditSubmit = async (e) => {
+    e.preventDefault();
+    if (!editingFeed) return;
+    setEditLoading(true);
+    try {
+      const payload = {
+        original_comment: {
+          message: editForm.message,
+          media_url: editForm.media_url,
+        }
+      };
+      await axiosInstance.patch(`/feed/${editingFeed.id}/`, payload);
+      alert("Feed updated successfully");
+      
+      setFeed(prevFeed => prevFeed.map(item => {
+        if (item.id === editingFeed.id) {
+          return {
+            ...item,
+            original_comment: {
+              ...item.original_comment,
+              message: editForm.message,
+              media_url: editForm.media_url
+            }
+          };
+        }
+        return item;
+      }));
+      setEditingFeed(null);
+    } catch (err) {
+      console.error(err);
+      alert("Failed to update feed");
+    } finally {
+      setEditLoading(false);
     }
   };
 
@@ -213,8 +262,14 @@ const FeedAdminPage = () => {
                         {/* Actions */}
                         <td>
                           <button
+                            onClick={() => openEditModal(item)}
+                            className="btn btn-sm btn-primary me-2 mb-1"
+                          >
+                            Edit
+                          </button>
+                          <button
                             onClick={() => handleDelete(item.id)}
-                            className="btn btn-sm btn-danger"
+                            className="btn btn-sm btn-danger mb-1"
                           >
                             Delete
                           </button>
@@ -278,6 +333,61 @@ const FeedAdminPage = () => {
                 Close
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit modal */}
+      {editingFeed && (
+        <div
+          className="position-fixed top-0 start-0 w-100 h-100 d-flex align-items-center justify-content-center"
+          style={{ background: "rgba(0,0,0,0.6)", zIndex: 9999 }}
+          onClick={() => setEditingFeed(null)}
+        >
+          <div
+            className="bg-white p-4 rounded shadow"
+            style={{ maxWidth: 600, width: "95%" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h4 className="mb-3">Edit Feed Content</h4>
+            <form onSubmit={handleEditSubmit}>
+              <div className="mb-3">
+                <label className="form-label fw-bold">Message</label>
+                <textarea
+                  className="form-control"
+                  rows="4"
+                  value={editForm.message}
+                  onChange={(e) => setEditForm({ ...editForm, message: e.target.value })}
+                  required
+                ></textarea>
+              </div>
+              <div className="mb-3">
+                <label className="form-label fw-bold">Media URL (Video or Image)</label>
+                <input
+                  type="url"
+                  className="form-control"
+                  value={editForm.media_url}
+                  onChange={(e) => setEditForm({ ...editForm, media_url: e.target.value })}
+                />
+              </div>
+              <div className="d-flex justify-content-end gap-2 mt-4">
+                <button
+                  type="button"
+                  className="btn btn-outline-secondary"
+                  onClick={() => setEditingFeed(null)}
+                  disabled={editLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn btn-primary"
+                  disabled={editLoading}
+                >
+                  {editLoading ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

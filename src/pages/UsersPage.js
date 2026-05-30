@@ -1,6 +1,7 @@
 // src/pages/UsersPage.js
 import React, { useEffect, useState } from "react";
 import axios from "axios";
+import "./UsersPage.css";
 
 const API_BASE = "https://api.cookeaze.app/api";
 
@@ -148,22 +149,24 @@ export default function UsersPage() {
   };
 
   return (
-    <div className="container py-4">
-      <div className="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
-        <h3 className="fw-bold mb-0">Users Management</h3>
+    <div className="container py-4 users-page-container">
+      <div className="d-flex flex-wrap justify-content-between align-items-center mb-4 users-header">
+        <h3 className="users-title mb-0">Users Management</h3>
 
-        <div className="d-flex gap-2 align-items-center">
+        <div className="users-controls">
           <input
-            type="text"
+            type="search"
+            autoComplete="off"
+            name="prevent_autofill_search"
             placeholder="Search by name or email..."
-            className="form-control form-control-sm"
+            className="modern-input"
             style={{ width: 260 }}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
 
           <select
-            className="form-select form-select-sm"
+            className="modern-select"
             value={roleFilter}
             onChange={(e) => setRoleFilter(e.target.value)}
           >
@@ -176,76 +179,59 @@ export default function UsersPage() {
       </div>
 
       {message && (
-        <div className="alert alert-info py-2 small text-center">{message}</div>
+        <div className="alert alert-info py-2 small text-center rounded shadow-sm">{message}</div>
       )}
 
-      <div className="table-responsive shadow-sm rounded bg-white">
-        <table className="table table-hover align-middle mb-0">
-          <thead className="table-dark">
-            <tr>
-              <th>ID</th>
-              <th>Profile</th>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Country</th>
-              <th>Role</th>
-              <th style={{ minWidth: 160 }}>Change Role</th>
-              <th style={{ minWidth: 220 }}>Change Password</th>
-              <th>Status</th>
-            </tr>
-          </thead>
-
-          <tbody>
-            {loading ? (
+      <div className="users-card">
+        <div className="users-table-wrapper">
+          <table className="users-table">
+            <thead>
               <tr>
-                <td colSpan="9" className="text-center py-4">
-                  <div className="spinner-border text-primary" role="status" />
-                </td>
+                <th>ID</th>
+                <th>User</th>
+                <th>Country</th>
+                <th>Role</th>
+                <th style={{ minWidth: 160 }}>Change Role</th>
+                <th style={{ minWidth: 220 }}>Change Password</th>
+                <th>Status</th>
               </tr>
-            ) : currentUsers.length > 0 ? (
-              currentUsers.map((u) => (
-                <tr key={u.id}>
-                  <td className="text-muted">{u.id}</td>
-                  <td>
-                    <img
-                      src={u.profile_picture_url}
-                      alt={u.first_name}
-                      className="rounded-circle"
-                      style={{ width: 45, height: 45, objectFit: "cover" }}
-                    />
+            </thead>
+
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan="7" className="text-center py-5">
+                    <div className="spinner-border text-primary" role="status" />
                   </td>
-                  <td className="fw-semibold">
-                    {u.first_name} {u.last_name}
-                  </td>
-                  <td
-                    style={{
-                      maxWidth: 220,
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
-                    {u.email}
-                  </td>
-                  <td>{u.country || "-"}</td>
-                  <td>
-                    <span
-                      className={`badge ${
-                        u.role === "superAdmin"
-                          ? "bg-danger"
-                          : u.role === "admin"
-                          ? "bg-warning text-dark"
-                          : "bg-secondary"
-                      }`}
-                    >
-                      {u.role}
-                    </span>
-                  </td>
+                </tr>
+              ) : currentUsers.length > 0 ? (
+                currentUsers.map((u) => (
+                  <tr key={u.id}>
+                    <td className="text-muted font-monospace small">#{u.id}</td>
+                    <td>
+                      <div className="profile-cell">
+                        <img
+                          src={u.profile_picture_url || "https://via.placeholder.com/45"}
+                          alt={u.first_name}
+                          className="profile-avatar"
+                        />
+                        <div>
+                          <div className="profile-name">{u.first_name} {u.last_name}</div>
+                          <div className="profile-email">{u.email}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td>{u.country || "-"}</td>
+                    <td>
+                      <span className={`role-badge role-${u.role === 'superAdmin' ? 'superAdmin' : u.role === 'admin' ? 'admin' : 'user'}`}>
+                        {u.role === 'superAdmin' ? 'Super Admin' : u.role === 'admin' ? 'Admin' : 'User'}
+                      </span>
+                    </td>
 
                   <td>
-                    <div className="d-flex gap-1 align-items-center">
+                    <div className="action-group">
                       <select
-                        className="form-select form-select-sm"
+                        className="action-select"
                         value={selectedRole[u.id] || ""}
                         onChange={(e) =>
                           setSelectedRole((s) => ({
@@ -256,124 +242,107 @@ export default function UsersPage() {
                         disabled={!!roleLoading[u.id]}
                       >
                         <option value="">Select</option>
-                        <option value="superAdmin">superAdmin</option>
-                        <option value="admin">admin</option>
-                        <option value="user">user</option>
+                        <option value="superAdmin">SuperAdmin</option>
+                        <option value="admin">Admin</option>
+                        <option value="user">User</option>
                       </select>
 
                       <button
-                        className="btn btn-sm btn-success"
+                        className="btn-modern btn-modern-success"
                         onClick={() => handleRoleChange(u.id)}
                         disabled={!!roleLoading[u.id]}
                         title="Update role"
                       >
-                        {roleLoading[u.id] ? (
-                          <span className="spinner-border spinner-border-sm" />
-                        ) : (
-                          "Update"
-                        )}
+                        {roleLoading[u.id] ? "..." : "Update"}
                       </button>
                     </div>
                   </td>
 
                   <td>
-                    <input
-                      type="password"
-                      placeholder="New"
-                      className="form-control form-control-sm mb-1"
-                      value={passwords[u.id]?.new_password || ""}
-                      onChange={(e) =>
-                        setPasswords((p) => ({
-                          ...p,
-                          [u.id]: { ...p[u.id], new_password: e.target.value },
-                        }))
-                      }
-                      disabled={!!pwdLoading[u.id]}
-                    />
-                    <input
-                      type="password"
-                      placeholder="Confirm"
-                      className="form-control form-control-sm mb-1"
-                      value={passwords[u.id]?.confirm_new_password || ""}
-                      onChange={(e) =>
-                        setPasswords((p) => ({
-                          ...p,
-                          [u.id]: {
-                            ...p[u.id],
-                            confirm_new_password: e.target.value,
-                          },
-                        }))
-                      }
-                      disabled={!!pwdLoading[u.id]}
-                    />
-                    <button
-                      className="btn btn-sm btn-outline-primary w-100"
-                      onClick={() => handlePasswordChange(u.id)}
-                      disabled={!!pwdLoading[u.id]}
-                    >
-                      {pwdLoading[u.id] ? (
-                        <span className="spinner-border spinner-border-sm" />
-                      ) : (
-                        "Change"
-                      )}
-                    </button>
+                    <div className="action-group">
+                      <div className="password-inputs">
+                        <input
+                          type="password"
+                          autoComplete="new-password"
+                          placeholder="New Password"
+                          value={passwords[u.id]?.new_password || ""}
+                          onChange={(e) =>
+                            setPasswords((p) => ({
+                              ...p,
+                              [u.id]: { ...p[u.id], new_password: e.target.value },
+                            }))
+                          }
+                          disabled={!!pwdLoading[u.id]}
+                        />
+                        <input
+                          type="password"
+                          autoComplete="new-password"
+                          placeholder="Confirm Password"
+                          value={passwords[u.id]?.confirm_new_password || ""}
+                          onChange={(e) =>
+                            setPasswords((p) => ({
+                              ...p,
+                              [u.id]: {
+                                ...p[u.id],
+                                confirm_new_password: e.target.value,
+                              },
+                            }))
+                          }
+                          disabled={!!pwdLoading[u.id]}
+                        />
+                      </div>
+                      <button
+                        className="btn-modern btn-modern-primary"
+                        onClick={() => handlePasswordChange(u.id)}
+                        disabled={!!pwdLoading[u.id]}
+                      >
+                        {pwdLoading[u.id] ? "..." : "Change"}
+                      </button>
+                    </div>
                   </td>
 
-                  <td>{u.is_active ? "✅" : "❌"}</td>
+                  <td>
+                    <span className={u.is_active ? 'status-active' : 'status-inactive'} title={u.is_active ? "Active" : "Inactive"}>
+                      {u.is_active ? "✓" : "✗"}
+                    </span>
+                  </td>
                 </tr>
               ))
             ) : (
               <tr>
-                <td colSpan="9" className="text-center text-muted py-3">
-                  No users found.
+                <td colSpan="7" className="text-center text-muted py-5">
+                  No users found matching your criteria.
                 </td>
               </tr>
             )}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <nav
-          className="d-flex justify-content-center mt-3"
-          aria-label="Users pagination"
-        >
-          <ul className="pagination pagination-sm mb-0">
-            <li className={`page-item ${currentPage === 1 ? "disabled" : ""}`}>
-              <button
-                className="page-link"
-                onClick={() => goToPage(currentPage - 1)}
-              >
-                Prev
-              </button>
-            </li>
+        <div className="modern-pagination">
+          <button
+            className="pagination-btn prev-next"
+            onClick={() => goToPage(currentPage - 1)}
+            disabled={currentPage === 1}
+          >
+            Prev
+          </button>
 
-            {[...Array(totalPages).keys()].map((n) => (
-              <li
-                key={n}
-                className={`page-item ${currentPage === n + 1 ? "active" : ""}`}
-              >
-                <button className="page-link" onClick={() => goToPage(n + 1)}>
-                  {n + 1}
-                </button>
-              </li>
-            ))}
+          <span className="text-muted fw-semibold px-3 small">
+            Page {currentPage} of {totalPages}
+          </span>
 
-            <li
-              className={`page-item ${
-                currentPage === totalPages ? "disabled" : ""
-              }`}
-            >
-              <button
-                className="page-link"
-                onClick={() => goToPage(currentPage + 1)}
-              >
-                Next
-              </button>
-            </li>
-          </ul>
-        </nav>
+          <button
+            className="pagination-btn prev-next"
+            onClick={() => goToPage(currentPage + 1)}
+            disabled={currentPage === totalPages}
+          >
+            Next
+          </button>
+        </div>
       )}
     </div>
   );

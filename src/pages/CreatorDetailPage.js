@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useLocation } from "react-router-dom";
 import axios from "axios";
 
 const API_BASE = "https://api.cookeaze.app/api";
@@ -20,6 +20,8 @@ axiosInstance.interceptors.request.use((config) => {
 
 export default function CreatorDetailPage() {
   const { id } = useParams();
+  const location = useLocation();
+  const is_banned_from_state = location.state?.is_banned || false;
   
   const [creator, setCreator] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -39,6 +41,11 @@ export default function CreatorDetailPage() {
   const [selectedRecipe, setSelectedRecipe] = useState(null);
   const [modalTab, setModalTab] = useState("ingredients");
 
+  // Ban/Unban State
+  const [showBanModal, setShowBanModal] = useState(false);
+  const [banReason, setBanReason] = useState("");
+  const [banLoading, setBanLoading] = useState(false);
+
   // Fetch Profile
   useEffect(() => {
     let mounted = true;
@@ -48,6 +55,9 @@ export default function CreatorDetailPage() {
       .then((res) => {
         if (!mounted) return;
         const profileData = res.data?.data;
+        if (profileData && profileData.is_banned === undefined) {
+          profileData.is_banned = is_banned_from_state;
+        }
         setCreator(profileData);
         if (profileData && profileData.categories) {
            setCategories(profileData.categories);
@@ -108,6 +118,31 @@ export default function CreatorDetailPage() {
   const goToRecipePage = (p) => {
     if (p < 1 || p > recipeTotalPages) return;
     setRecipePage(p);
+  };
+
+  // Ban / Unban Handler
+  const handleBanUnban = async (action) => {
+    if (action === "ban" && !banReason.trim()) {
+      alert("Please provide a reason for banning this creator.");
+      return;
+    }
+    setBanLoading(true);
+    try {
+      const payload = { action };
+      if (action === "ban") payload.reason = banReason;
+      await axiosInstance.post(`/users/${id}/ban-creator/`, payload);
+      alert(`Creator ${action === "ban" ? "banned" : "unbanned"} successfully!`);
+      setShowBanModal(false);
+      setBanReason("");
+      // Update local creator state to reflect the change
+      setCreator(prev => ({ ...prev, is_banned: action === "ban" }));
+    } catch (err) {
+      console.error(err);
+      const msg = err?.response?.data?.message || `Failed to ${action} creator.`;
+      alert(msg);
+    } finally {
+      setBanLoading(false);
+    }
   };
 
   if (loading) {
@@ -188,6 +223,35 @@ export default function CreatorDetailPage() {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Ban/Unban Action Bar */}
+          <div className="px-4 pb-4 d-flex justify-content-end gap-2 align-items-center">
+            {creator.is_banned && (
+              <span className="badge bg-danger rounded-pill px-3 py-2 me-auto">
+                🚫 Creator is Banned
+              </span>
+            )}
+            {creator.is_banned ? (
+              <button
+                className="btn btn-success rounded-pill px-4 fw-semibold"
+                onClick={() => handleBanUnban("unban")}
+                disabled={banLoading}
+              >
+                {banLoading ? (
+                  <><span className="spinner-border spinner-border-sm me-2" role="status"></span>Processing...</>
+                ) : (
+                  <>✅ Unban Creator</>
+                )}
+              </button>
+            ) : (
+              <button
+                className="btn btn-outline-danger rounded-pill px-4 fw-semibold"
+                onClick={() => { setShowBanModal(true); setBanReason(""); }}
+              >
+                🚫 Ban Creator
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -378,6 +442,75 @@ export default function CreatorDetailPage() {
             </div>
           </div>
         </>
+      )}
+
+      {/* Ban Creator Modal */}
+      {showBanModal && (
+        <div className="modal show d-block" tabIndex="-1" style={{ backgroundColor: "rgba(0,0,0,0.6)" }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content border-0 shadow-lg overflow-hidden">
+              <div className="modal-header bg-danger text-white border-0 py-3 px-4">
+                <h5 className="modal-title fw-bold mb-0">
+                  <span className="me-2">🚫</span> Ban {creator.creator_name}
+                </h5>
+                <button
+                  type="button"
+                  className="btn-close btn-close-white"
+                  onClick={() => { setShowBanModal(false); setBanReason(""); }}
+                  disabled={banLoading}
+                ></button>
+              </div>
+              <div className="modal-body p-4">
+                <div className="d-flex align-items-center gap-3 mb-4 p-3 bg-light rounded">
+                  <img
+                    src={creator.profile_picture_url || "https://via.placeholder.com/50"}
+                    alt={creator.creator_name}
+                    className="rounded-circle shadow-sm"
+                    style={{ width: 50, height: 50, objectFit: "cover" }}
+                  />
+                  <div>
+                    <h6 className="fw-bold mb-0">{creator.creator_name}</h6>
+                    <small className="text-muted">{creator.total_recipes} recipes will be hidden</small>
+                  </div>
+                </div>
+
+                <div className="alert alert-warning border-0 shadow-sm small mb-3">
+                  <strong>⚠️ Warning:</strong> Banning this creator will hide all their recipes from the platform. This action can be reversed.
+                </div>
+
+                <label className="form-label fw-semibold">Reason for Ban <span className="text-danger">*</span></label>
+                <textarea
+                  className="form-control"
+                  rows="3"
+                  placeholder="Explain why this creator is being banned..."
+                  value={banReason}
+                  onChange={(e) => setBanReason(e.target.value)}
+                  disabled={banLoading}
+                ></textarea>
+              </div>
+              <div className="modal-footer border-0 px-4 pb-4 pt-0">
+                <button
+                  className="btn btn-light border px-4"
+                  onClick={() => { setShowBanModal(false); setBanReason(""); }}
+                  disabled={banLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-danger fw-bold px-4"
+                  onClick={() => handleBanUnban("ban")}
+                  disabled={banLoading || !banReason.trim()}
+                >
+                  {banLoading ? (
+                    <><span className="spinner-border spinner-border-sm me-2" role="status"></span>Banning...</>
+                  ) : (
+                    "Confirm Ban"
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

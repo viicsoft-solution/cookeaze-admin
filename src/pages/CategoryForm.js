@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from "react";
 import { getAxiosInstance } from "../api";
 import { useNavigate, useParams } from "react-router-dom";
+import CloudinaryService from "../components/cloudinaryService";
 
 /**
  * Use this component for both create and edit.
@@ -19,6 +20,7 @@ export default function CategoryForm() {
   });
   const [loading, setLoading] = useState(isEdit);
   const [status, setStatus] = useState(null);
+  const [imageUploading, setImageUploading] = useState(false);
 
   useEffect(() => {
     if (!isEdit) return;
@@ -44,6 +46,24 @@ export default function CategoryForm() {
       return true;
     } catch {
       return false;
+    }
+  };
+
+  const handleImageUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setImageUploading(true);
+    setStatus(null);
+    try {
+      const url = await CloudinaryService.uploadFile(file, { folder: "categories" });
+      setCategory((prev) => ({ ...prev, image_url: url }));
+      setStatus({ type: "success", text: "Image uploaded successfully." });
+    } catch (err) {
+      console.error(err);
+      setStatus({ type: "danger", text: "Failed to upload image." });
+    } finally {
+      setImageUploading(false);
     }
   };
 
@@ -110,19 +130,55 @@ export default function CategoryForm() {
           </div>
 
           <div className="mb-3">
-            <label className="form-label">Image URL (optional)</label>
-            <input
-              type="url"
-              className="form-control"
-              value={category.image_url || ""}
-              onChange={(e) =>
-                setCategory({ ...category, image_url: e.target.value })
-              }
-              placeholder="https://example.com/image.jpg"
-            />
+            <label className="form-label">Image (Upload or URL)</label>
+            <div className="d-flex gap-2 align-items-center mb-2">
+              <input
+                type="url"
+                className="form-control"
+                value={category.image_url || ""}
+                onChange={(e) =>
+                  setCategory({ ...category, image_url: e.target.value })
+                }
+                placeholder="https://example.com/image.jpg"
+              />
+              <span className="text-muted small fw-bold mx-1">OR</span>
+              <input
+                type="file"
+                accept="image/*"
+                id="categoryImageUpload"
+                style={{ display: "none" }}
+                onChange={handleImageUpload}
+              />
+              <label
+                htmlFor="categoryImageUpload"
+                className={`btn btn-outline-secondary text-nowrap mb-0 ${
+                  imageUploading ? "disabled" : ""
+                }`}
+                style={{ cursor: imageUploading ? "not-allowed" : "pointer" }}
+              >
+                {imageUploading ? (
+                  <>
+                    <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
+                    Uploading...
+                  </>
+                ) : (
+                  "Upload Image"
+                )}
+              </label>
+            </div>
             <div className="form-text">
               Leave blank if no image. If provided, must be a valid URL.
             </div>
+            {category.image_url && isValidUrl(category.image_url) && (
+              <div className="mt-2">
+                <img
+                  src={category.image_url}
+                  alt="Category Preview"
+                  className="img-thumbnail"
+                  style={{ maxHeight: "120px", objectFit: "cover" }}
+                />
+              </div>
+            )}
           </div>
 
           <div className="d-flex gap-2">

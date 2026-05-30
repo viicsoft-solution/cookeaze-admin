@@ -11,6 +11,8 @@ import {
   Search,
   ChevronLeft,
   ChevronRight,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 import cloudinaryService from "./cloudinaryService";
@@ -30,6 +32,7 @@ const HomeSectionAdmin = () => {
     items: [],
   });
   const [filterType, setFilterType] = useState("all");
+  const [visibilityFilter, setVisibilityFilter] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [showConfirm, setShowConfirm] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
@@ -103,6 +106,8 @@ const HomeSectionAdmin = () => {
     "themed_recipe_grid",
     "recipe_grid",
     "graphic_banner",
+    "creator_spotlight",
+    "exclusive_recipes",
   ];
 
   // Fetch sections on mount
@@ -252,19 +257,34 @@ const HomeSectionAdmin = () => {
     }
   };
 
-  // Fetch sections
+  // Fetch sections (active + disabled)
   const fetchSections = async () => {
     try {
       setLoading(true);
-      const response = await fetch(`${API_BASE}/`, {
-        headers: { accept: "application/json" },
-      });
-      const data = await response.json();
+      const token = localStorage.getItem("token");
 
-      if (data.isSuccessful) {
-        setSections(data.data || []);
+      const [activeRes, disabledRes] = await Promise.all([
+        fetch(`${API_BASE}/`, { headers: { accept: "application/json" } }),
+        fetch(`${API_BASE}/disabled/`, {
+          headers: {
+            accept: "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+        }),
+      ]);
+
+      const activeData = await activeRes.json();
+      const disabledData = await disabledRes.json();
+
+      const activeSections = activeData.isSuccessful ? (activeData.data || []) : [];
+      const disabledSections = disabledData.isSuccessful
+        ? (disabledData.data || []).map((s) => ({ ...s, is_active: false }))
+        : [];
+
+      if (activeData.isSuccessful || disabledData.isSuccessful) {
+        setSections([...activeSections, ...disabledSections]);
       } else {
-        showAlert(data.message || "Failed to fetch sections", "danger");
+        showAlert("Failed to fetch sections", "danger");
       }
     } catch (error) {
       console.error("Error fetching sections:", error);
@@ -280,7 +300,9 @@ const HomeSectionAdmin = () => {
       setLoadingItems(true);
 
       if (itemType === "recipe") {
-        let apiUrl = `${RECIPES_API}?page=${page}`;
+        let apiUrl = newSection.type === "exclusive_recipes" 
+          ? `https://api.cookeaze.app/api/recipes/exclusive/?page=${page}` 
+          : `${RECIPES_API}?page=${page}`;
         if (search) apiUrl += `&search=${encodeURIComponent(search)}`;
 
         const response = await fetch(apiUrl, {
@@ -295,6 +317,23 @@ const HomeSectionAdmin = () => {
           setRecipesTotalPages(Math.ceil(totalCount / itemsPerPage));
         } else {
           showAlert(`Failed to fetch ${itemType}s`, "warning");
+          setAvailableItems([]);
+        }
+      } else if (itemType === "user") {
+        let apiUrl = `https://api.cookeaze.app/api/creators/?page=${page}`;
+        if (search) apiUrl += `&search=${encodeURIComponent(search)}`;
+
+        const response = await fetch(apiUrl, {
+          headers: { accept: "application/json" },
+        });
+        const data = await response.json();
+
+        if (data.isSuccessful) {
+          setAvailableItems(data.data || []);
+          const pagination = data.pagination;
+          setRecipesTotalPages(pagination?.total_pages || 1);
+        } else {
+          showAlert(`Failed to fetch creators`, "warning");
           setAvailableItems([]);
         }
       } else {
@@ -324,7 +363,9 @@ const HomeSectionAdmin = () => {
       setLoadingEditItems(true);
 
       if (itemType === "recipe") {
-        let apiUrl = `${RECIPES_API}?page=${page}`;
+        let apiUrl = editFormData.type === "exclusive_recipes" 
+          ? `https://api.cookeaze.app/api/recipes/exclusive/?page=${page}` 
+          : `${RECIPES_API}?page=${page}`;
         if (search) apiUrl += `&search=${encodeURIComponent(search)}`;
 
         const response = await fetch(apiUrl, {
@@ -339,6 +380,23 @@ const HomeSectionAdmin = () => {
           setEditRecipesTotalPages(Math.ceil(totalCount / itemsPerPage));
         } else {
           showAlert(`Failed to fetch ${itemType}s`, "warning");
+          setEditAvailableItems([]);
+        }
+      } else if (itemType === "user") {
+        let apiUrl = `https://api.cookeaze.app/api/creators/?page=${page}`;
+        if (search) apiUrl += `&search=${encodeURIComponent(search)}`;
+
+        const response = await fetch(apiUrl, {
+          headers: { accept: "application/json" },
+        });
+        const data = await response.json();
+
+        if (data.isSuccessful) {
+          setEditAvailableItems(data.data || []);
+          const pagination = data.pagination;
+          setEditRecipesTotalPages(pagination?.total_pages || 1);
+        } else {
+          showAlert(`Failed to fetch creators`, "warning");
           setEditAvailableItems([]);
         }
       } else {
@@ -544,6 +602,35 @@ const HomeSectionAdmin = () => {
     } catch (error) {
       console.error("Error updating section:", error);
       showAlert("Failed to update section", "danger");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Toggle visibility
+  const toggleVisibility = async (id, currentStatus) => {
+    try {
+      setLoading(true);
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${API_BASE}/${id}/toggle-visibility/`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ is_active: !currentStatus }),
+      });
+      const data = await response.json();
+
+      if (data.isSuccessful) {
+        await fetchSections();
+        showAlert(data.message || `Section is now ${!currentStatus ? 'visible' : 'hidden'}.`, "success");
+      } else {
+        showAlert(data.message || "Failed to toggle visibility", "danger");
+      }
+    } catch (error) {
+      console.error("Error toggling visibility:", error);
+      showAlert("Failed to toggle visibility", "danger");
     } finally {
       setLoading(false);
     }
@@ -756,18 +843,82 @@ const HomeSectionAdmin = () => {
     const matchesSearch = section.title
       .toLowerCase()
       .includes(searchTerm.toLowerCase());
-    return matchesType && matchesSearch;
+      
+    let matchesVisibility = true;
+    if (visibilityFilter === "visible") {
+      matchesVisibility = section.is_active === true;
+    } else if (visibilityFilter === "hidden") {
+      matchesVisibility = section.is_active === false;
+    }
+
+    return matchesType && matchesSearch && matchesVisibility;
   });
 
   return (
-    <div className="min-vh-100 bg-light p-4">
-      <div className="container">
+    <div className="min-vh-100 bg-light p-4" style={{ fontFamily: "'Inter', sans-serif" }}>
+      <div className="container-fluid" style={{ maxWidth: "1400px" }}>
         {/* Header */}
-        <div className="mb-5">
-          <h1 className="display-4 fw-bold mb-2">Home Section Manager</h1>
-          <p className="text-secondary">
-            Manage and organize your application's home page sections
-          </p>
+        <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-end mb-4 border-bottom pb-3">
+          <div>
+            <h1 className="h2 fw-bold text-dark mb-1">Home Section Manager</h1>
+            <p className="text-secondary mb-0">
+              Manage and organize your application's home page sections
+            </p>
+          </div>
+          <div className="mt-3 mt-md-0">
+            <button
+              onClick={() => setShowForm(!showForm)}
+              className="btn btn-primary d-flex align-items-center gap-2 shadow-sm fw-medium"
+            >
+              {showForm ? <X size={18} /> : <Plus size={18} />} 
+              {showForm ? "Cancel Creation" : "Create New Section"}
+            </button>
+          </div>
+        </div>
+
+        {/* Stats */}
+        <div className="row g-3 mb-4">
+          <div className="col-12 col-md-4">
+            <div className="card border-0 shadow-sm rounded-3 bg-white p-3 border-start border-4 border-primary h-100">
+              <div className="d-flex justify-content-between align-items-center">
+                <div>
+                  <p className="text-muted small text-uppercase mb-1 fw-bold">Total Sections</p>
+                  <h3 className="mb-0 fw-bold text-dark">{filteredSections.length}</h3>
+                </div>
+                <div className="bg-primary bg-opacity-10 p-3 rounded-3 text-primary">
+                  <Search size={24} />
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="col-12 col-md-4">
+            <div className="card border-0 shadow-sm rounded-3 bg-white p-3 border-start border-4 border-success h-100">
+              <div className="d-flex justify-content-between align-items-center">
+                <div>
+                  <p className="text-muted small text-uppercase mb-1 fw-bold">Total Items</p>
+                  <h3 className="mb-0 fw-bold text-dark">
+                    {filteredSections.reduce((sum, s) => sum + (s.items?.length || 0), 0)}
+                  </h3>
+                </div>
+                <div className="bg-success bg-opacity-10 p-3 rounded-3 text-success">
+                  <Plus size={24} />
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="col-12 col-md-4">
+            <div className="card border-0 shadow-sm rounded-3 bg-white p-3 border-start border-4 border-info h-100">
+              <div className="d-flex justify-content-between align-items-center">
+                <div>
+                  <p className="text-muted small text-uppercase mb-1 fw-bold">Section Types</p>
+                  <h3 className="mb-0 fw-bold text-dark">{new Set(filteredSections.map((s) => s.type)).size}</h3>
+                </div>
+                <div className="bg-info bg-opacity-10 p-3 rounded-3 text-info">
+                  <Eye size={24} />
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         {/* Alert */}
@@ -786,51 +937,61 @@ const HomeSectionAdmin = () => {
         )}
 
         {/* Controls */}
-        <div className="card p-4 mb-4 shadow-sm">
-          <div className="row g-3 mb-3">
-            <div className="col-12 col-md-4">
-              <input
-                type="text"
-                placeholder="Search sections..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="form-control"
-              />
-            </div>
+        <div className="card border-0 shadow-sm rounded-3 bg-white mb-4">
+          <div className="card-body p-3 p-md-4">
+            <div className="row g-3 align-items-center">
+              <div className="col-12 col-md-4">
+                <div className="input-group shadow-sm">
+                  <span className="input-group-text bg-white border-end-0 text-muted">
+                    <Search size={18} />
+                  </span>
+                  <input
+                    type="text"
+                    placeholder="Search sections..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="form-control border-start-0 ps-0"
+                  />
+                </div>
+              </div>
 
-            <div className="col-12 col-md-4">
-              <select
-                value={filterType}
-                onChange={(e) => setFilterType(e.target.value)}
-                className="form-select"
-              >
-                <option value="all">All Types</option>
-                {sectionTypes.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
-                ))}
-              </select>
-            </div>
+              <div className="col-12 col-md-4">
+                <select
+                  value={filterType}
+                  onChange={(e) => setFilterType(e.target.value)}
+                  className="form-select shadow-sm"
+                >
+                  <option value="all">All Types</option>
+                  {sectionTypes.map((type) => (
+                    <option key={type} value={type}>
+                      {type}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
-            <div className="col-12 col-md-4 d-grid">
-              <button
-                onClick={() => setShowForm(true)}
-                className="btn btn-success d-flex align-items-center justify-content-center gap-2"
-              >
-                <Plus size={20} /> Create Section
-              </button>
+              <div className="col-12 col-md-4">
+                <select
+                  value={visibilityFilter}
+                  onChange={(e) => setVisibilityFilter(e.target.value)}
+                  className="form-select shadow-sm"
+                >
+                  <option value="all">All Visibility</option>
+                  <option value="visible">Visible Only</option>
+                  <option value="hidden">Hidden Only</option>
+                </select>
+              </div>
             </div>
+            {loading && <div className="mt-3 text-primary small fw-medium d-flex align-items-center"><span className="spinner-border spinner-border-sm me-2"></span>Loading data...</div>}
           </div>
-          {loading && <p className="text-secondary">Loading...</p>}
         </div>
 
         {/* Create Form */}
         {showForm && (
-          <div className="card border-start border-4 border-success p-4 mb-4 shadow-sm">
-            <h3 className="h5 fw-bold mb-3">Create New Section</h3>
+          <div className="card border-0 shadow-sm rounded-3 p-4 mb-4 bg-white border-top border-4 border-primary">
+            <h4 className="fw-bold mb-4 text-dark">Create New Section</h4>
 
-            <div className="row g-3 mb-3">
+            <div className="row g-3 mb-4">
               <div className="col-12 col-md-4">
                 <input
                   type="text"
@@ -846,9 +1007,20 @@ const HomeSectionAdmin = () => {
               <div className="col-12 col-md-4">
                 <select
                   value={newSection.type}
-                  onChange={(e) =>
-                    setNewSection({ ...newSection, type: e.target.value })
-                  }
+                  onChange={(e) => {
+                    const newType = e.target.value;
+                    setNewSection({ ...newSection, type: newType });
+                    if (newType === "creator_spotlight") {
+                      setNewItem(prev => ({ ...prev, item_type: "user", item_id: "" }));
+                      setSelectedItemPreview(null);
+                    } else if (newType === "exclusive_recipes") {
+                      setNewItem(prev => ({ ...prev, item_type: "recipe", item_id: "" }));
+                      setSelectedItemPreview(null);
+                    } else if (newItem.item_type === "user") {
+                      setNewItem(prev => ({ ...prev, item_type: "recipe", item_id: "" }));
+                      setSelectedItemPreview(null);
+                    }
+                  }}
                   className="form-select"
                 >
                   {sectionTypes.map((type) => (
@@ -967,9 +1139,18 @@ const HomeSectionAdmin = () => {
                           setSelectedItemPreview(null);
                         }}
                         className="form-select form-select-sm"
+                        disabled={newSection.type === "creator_spotlight" || newSection.type === "exclusive_recipes"}
                       >
-                        <option value="recipe">Recipe</option>
-                        <option value="theme">Theme</option>
+                        {newSection.type === "creator_spotlight" ? (
+                          <option value="user">User</option>
+                        ) : newSection.type === "exclusive_recipes" ? (
+                          <option value="recipe">Recipe</option>
+                        ) : (
+                          <>
+                            <option value="recipe">Recipe</option>
+                            <option value="theme">Theme</option>
+                          </>
+                        )}
                       </select>
                     </div>
 
@@ -1015,7 +1196,7 @@ const HomeSectionAdmin = () => {
                         className="btn btn-sm btn-outline-primary w-100 text-start"
                       >
                         {newItem.item_id
-                          ? `${selectedItemPreview?.name || selectedItemPreview?.themeName}`
+                          ? `${selectedItemPreview?.name || selectedItemPreview?.themeName || selectedItemPreview?.creator_name || "Selected"}`
                           : `Browse ${newItem.item_type}s...`}
                       </button>
                     </div>
@@ -1063,12 +1244,13 @@ const HomeSectionAdmin = () => {
                     <div className="mt-3 p-3 border rounded bg-white">
                       <h6 className="small fw-bold mb-2">Preview:</h6>
                       <div className="d-flex align-items-start gap-3">
-                        {selectedItemPreview.image_url && (
+                        {(selectedItemPreview.image_url || selectedItemPreview.profile_picture_url) && (
                           <img
-                            src={selectedItemPreview.image_url}
+                            src={selectedItemPreview.image_url || selectedItemPreview.profile_picture_url}
                             alt={
                               selectedItemPreview.name ||
-                              selectedItemPreview.themeName
+                              selectedItemPreview.themeName ||
+                              selectedItemPreview.creator_name
                             }
                             style={{
                               width: "100px",
@@ -1085,7 +1267,8 @@ const HomeSectionAdmin = () => {
                         <div className="flex-grow-1">
                           <p className="mb-1 fw-bold">
                             {selectedItemPreview.name ||
-                              selectedItemPreview.themeName}
+                              selectedItemPreview.themeName ||
+                              selectedItemPreview.creator_name}
                           </p>
                           <p className="mb-1 small text-muted">
                             ID: {selectedItemPreview.id}
@@ -1131,7 +1314,16 @@ const HomeSectionAdmin = () => {
                 </div>
               ) : (
                 <button
-                  onClick={() => setShowItemForm(true)}
+                  onClick={() => {
+                    setNewItem({
+                      item_type: newSection.type === "creator_spotlight" ? "user" : "recipe",
+                      item_id: "",
+                      card_color: "#FF5733",
+                      image_url: "",
+                      link_url: "",
+                    });
+                    setShowItemForm(true);
+                  }}
                   className="btn btn-sm btn-outline-primary mb-3"
                 >
                   <Plus size={16} className="me-1" /> Add Item
@@ -1180,45 +1372,49 @@ const HomeSectionAdmin = () => {
         {/* Sections List */}
         <div className="mb-4">
           {filteredSections.length === 0 ? (
-            <div className="card p-4 text-center">
-              <p className="text-secondary mb-0">
-                No sections found. Create one to get started!
-              </p>
+            <div className="card border-0 shadow-sm rounded-3 p-5 text-center bg-white">
+              <div className="text-muted mb-3"><Search size={40} opacity={0.5} /></div>
+              <h5 className="text-dark fw-bold">No sections found</h5>
+              <p className="text-secondary mb-0">Create a new section or adjust your search filters.</p>
             </div>
           ) : (
             filteredSections.map((section) => (
-              <div key={section.id} className="card mb-3 shadow-sm">
+              <div key={section.id} className="card mb-3 border-0 shadow-sm rounded-3">
                 {/* Section Header */}
                 <div
-                  className="card-header d-flex justify-content-between align-items-center"
+                  className="card-header bg-white border-bottom-0 p-3 p-md-4 d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3"
                   onClick={() =>
                     setExpandedId(expandedId === section.id ? null : section.id)
                   }
                   style={{ cursor: "pointer" }}
                 >
                   <div className="d-flex align-items-center gap-3 flex-grow-1">
-                    <button className="btn btn-sm btn-light p-0">
-                      {expandedId === section.id ? (
-                        <ChevronUp />
-                      ) : (
-                        <ChevronDown />
-                      )}
+                    <button className="btn btn-sm btn-light rounded-circle p-2 d-flex align-items-center justify-content-center" style={{ width: "36px", height: "36px" }}>
+                      {expandedId === section.id ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
                     </button>
                     <div>
-                      <h5 className="mb-1">{section.title}</h5>
+                      <h5 className="mb-1 fw-bold text-dark">{section.title}</h5>
                       <div className="d-flex gap-2 flex-wrap">
-                        <span className="badge bg-primary">{section.type}</span>
-                        <span className="badge bg-secondary">
-                          Order: {section.order}
-                        </span>
-                        <span className="badge bg-secondary">
-                          {section.items?.length || 0} items
-                        </span>
+                        <span className="badge bg-primary px-3 py-2 rounded-pill fw-medium">{section.type}</span>
+                        <span className="badge bg-secondary px-3 py-2 rounded-pill fw-medium">Order: {section.order}</span>
+                        <span className="badge bg-info px-3 py-2 rounded-pill fw-medium">{section.items?.length || 0} items</span>
+                        {!section.is_active && <span className="badge bg-warning text-dark px-3 py-2 rounded-pill fw-medium">Hidden</span>}
                       </div>
                     </div>
                   </div>
 
                   <div className="d-flex gap-2">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleVisibility(section.id, section.is_active);
+                      }}
+                      className="btn btn-outline-secondary btn-sm"
+                      title={section.is_active ? "Hide Section" : "Show Section"}
+                    >
+                      {section.is_active ? <EyeOff size={18} /> : <Eye size={18} />}
+                    </button>
+
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -1314,12 +1510,20 @@ const HomeSectionAdmin = () => {
                       <div className="col-12 col-md-4">
                         <select
                           value={editFormData.type || ""}
-                          onChange={(e) =>
-                            setEditFormData({
-                              ...editFormData,
-                              type: e.target.value,
-                            })
-                          }
+                          onChange={(e) => {
+                            const newType = e.target.value;
+                            setEditFormData({ ...editFormData, type: newType });
+                            if (newType === "creator_spotlight") {
+                              setEditItem(prev => ({ ...prev, item_type: "user", item_id: "" }));
+                              setEditItemPreview(null);
+                            } else if (newType === "exclusive_recipes") {
+                              setEditItem(prev => ({ ...prev, item_type: "recipe", item_id: "" }));
+                              setEditItemPreview(null);
+                            } else if (editItem.item_type === "user") {
+                              setEditItem(prev => ({ ...prev, item_type: "recipe", item_id: "" }));
+                              setEditItemPreview(null);
+                            }
+                          }}
                           className="form-select"
                         >
                           {sectionTypes.map((type) => (
@@ -1378,6 +1582,7 @@ const HomeSectionAdmin = () => {
                             const displayName =
                               originalItem?.name ??
                               originalItem?.themeName ??
+                              originalItem?.creator_name ??
                               item.item_name ??
                               "Unknown";
 
@@ -1451,7 +1656,7 @@ const HomeSectionAdmin = () => {
                                     onClick={() => {
                                       setEditingItemIndex(idx);
                                       setEditItem({
-                                        item_type: item.item_type || "recipe",
+                                        item_type: editFormData.type === "creator_spotlight" ? "user" : (item.item_type || "recipe"),
                                         item_id: item.item_id?.toString() || "",
                                         card_color: swatchColor || "#FF5733",
                                         image_url: item.image_url || "",
@@ -1500,9 +1705,18 @@ const HomeSectionAdmin = () => {
                                   setEditItemPreview(null);
                                 }}
                                 className="form-select form-select-sm"
+                                disabled={editFormData.type === "creator_spotlight" || editFormData.type === "exclusive_recipes"}
                               >
-                                <option value="recipe">Recipe</option>
-                                <option value="theme">Theme</option>
+                                {editFormData.type === "creator_spotlight" ? (
+                                  <option value="user">User</option>
+                                ) : editFormData.type === "exclusive_recipes" ? (
+                                  <option value="recipe">Recipe</option>
+                                ) : (
+                                  <>
+                                    <option value="recipe">Recipe</option>
+                                    <option value="theme">Theme</option>
+                                  </>
+                                )}
                               </select>
                             </div>
 
@@ -1558,7 +1772,7 @@ const HomeSectionAdmin = () => {
                                 className="btn btn-sm btn-outline-primary w-100 text-start"
                               >
                                 {editItem.item_id
-                                  ? `${editItemPreview?.name || editItemPreview?.themeName || "Selected"}`
+                                  ? `${editItemPreview?.name || editItemPreview?.themeName || editItemPreview?.creator_name || "Selected"}`
                                   : `Browse ${editItem.item_type}s...`}
                               </button>
                             </div>
@@ -1614,12 +1828,13 @@ const HomeSectionAdmin = () => {
                             <div className="mt-3 p-3 border rounded bg-white">
                               <h6 className="small fw-bold mb-2">Preview:</h6>
                               <div className="d-flex align-items-start gap-3">
-                                {editItemPreview.image_url && (
+                                {(editItemPreview.image_url || editItemPreview.profile_picture_url) && (
                                   <img
-                                    src={editItemPreview.image_url}
+                                    src={editItemPreview.image_url || editItemPreview.profile_picture_url}
                                     alt={
                                       editItemPreview.name ||
-                                      editItemPreview.themeName
+                                      editItemPreview.themeName ||
+                                      editItemPreview.creator_name
                                     }
                                     style={{
                                       width: "100px",
@@ -1636,7 +1851,8 @@ const HomeSectionAdmin = () => {
                                 <div className="flex-grow-1">
                                   <p className="mb-1 fw-bold">
                                     {editItemPreview.name ||
-                                      editItemPreview.themeName}
+                                      editItemPreview.themeName ||
+                                      editItemPreview.creator_name}
                                   </p>
                                   {editItemPreview.id && (
                                     <p className="mb-1 small text-muted">
@@ -1692,7 +1908,7 @@ const HomeSectionAdmin = () => {
                             setShowEditItemForm(true);
                             setEditingItemIndex(null);
                             setEditItem({
-                              item_type: "recipe",
+                              item_type: editFormData.type === "creator_spotlight" ? "user" : "recipe",
                               item_id: "",
                               card_color: "#FF5733",
                               image_url: "",
@@ -1768,10 +1984,10 @@ const HomeSectionAdmin = () => {
                           >
                             <div className="card-body d-flex justify-content-between align-items-start p-3">
                               <div className="d-flex align-items-center gap-3">
-                                {item.item?.image_url && (
+                                {(item.item?.image_url || item.item?.profile_picture_url) && (
                                   <img
-                                    src={item.item.image_url}
-                                    alt={item.item.name || item.item.themeName}
+                                    src={item.item.image_url || item.item.profile_picture_url}
+                                    alt={item.item.name || item.item.themeName || item.item.creator_name}
                                     style={{
                                       width: "60px",
                                       height: "60px",
@@ -1799,6 +2015,7 @@ const HomeSectionAdmin = () => {
                                   <p className="mb-1 fw-bold">
                                     {item.item?.name ||
                                       item.item?.themeName ||
+                                      item.item?.creator_name ||
                                       "Item #" + item.sectionItemId}
                                   </p>
                                   {item.item?.id && (
@@ -1839,32 +2056,7 @@ const HomeSectionAdmin = () => {
           )}
         </div>
 
-        {/* Stats */}
-        <div className="row g-3 mt-4">
-          <div className="col-12 col-md-4">
-            <div className="card text-center p-3">
-              <p className="text-secondary small mb-1">Total Sections</p>
-              <h4>{filteredSections.length}</h4>
-            </div>
-          </div>
-          <div className="col-12 col-md-4">
-            <div className="card text-center p-3">
-              <p className="text-secondary small mb-1">Total Items</p>
-              <h4>
-                {filteredSections.reduce(
-                  (sum, s) => sum + (s.items?.length || 0),
-                  0,
-                )}
-              </h4>
-            </div>
-          </div>
-          <div className="col-12 col-md-4">
-            <div className="card text-center p-3">
-              <p className="text-secondary small mb-1">Section Types</p>
-              <h4>{new Set(filteredSections.map((s) => s.type)).size}</h4>
-            </div>
-          </div>
-        </div>
+        {/* End Stats (moved to top) */}
 
         {/* Select Item Modal (Create Mode) */}
         {showSelectModal && (
@@ -1945,10 +2137,10 @@ const HomeSectionAdmin = () => {
                           >
                             <div className="card-body">
                               <div className="d-flex align-items-center gap-3">
-                                {item.image_url && (
+                                {(item.image_url || item.profile_picture_url) && (
                                   <img
-                                    src={item.image_url}
-                                    alt={item.name || item.themeName}
+                                    src={item.image_url || item.profile_picture_url}
+                                    alt={item.name || item.themeName || item.creator_name}
                                     style={{
                                       width: "80px",
                                       height: "80px",
@@ -1963,7 +2155,7 @@ const HomeSectionAdmin = () => {
                                 )}
                                 <div className="flex-grow-1">
                                   <h6 className="mb-1">
-                                    {item.name || item.themeName}
+                                    {item.name || item.themeName || item.creator_name}
                                   </h6>
                                   <p className="mb-0 small text-muted">
                                     ID: {item.id}
@@ -2105,10 +2297,10 @@ const HomeSectionAdmin = () => {
                           >
                             <div className="card-body">
                               <div className="d-flex align-items-center gap-3">
-                                {item.image_url && (
+                                {(item.image_url || item.profile_picture_url) && (
                                   <img
-                                    src={item.image_url}
-                                    alt={item.name || item.themeName}
+                                    src={item.image_url || item.profile_picture_url}
+                                    alt={item.name || item.themeName || item.creator_name}
                                     style={{
                                       width: "80px",
                                       height: "80px",
@@ -2123,7 +2315,7 @@ const HomeSectionAdmin = () => {
                                 )}
                                 <div className="flex-grow-1">
                                   <h6 className="mb-1">
-                                    {item.name || item.themeName}
+                                    {item.name || item.themeName || item.creator_name}
                                   </h6>
                                   <p className="mb-0 small text-muted">
                                     ID: {item.id}

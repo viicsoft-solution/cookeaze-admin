@@ -30,6 +30,7 @@ export default function CreatorsPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [creatorStatusFilter, setCreatorStatusFilter] = useState("active"); // "active" | "banned"
 
   // === Applications State ===
   const [apps, setApps] = useState([]);
@@ -45,6 +46,11 @@ export default function CreatorsPage() {
   const [myApp, setMyApp] = useState(null);
   const [myAppLoading, setMyAppLoading] = useState(false);
   const [myAppError, setMyAppError] = useState("");
+
+  // === Ban/Unban State ===
+  const [banTarget, setBanTarget] = useState(null);
+  const [banReason, setBanReason] = useState("");
+  const [banLoading, setBanLoading] = useState(false);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -64,11 +70,17 @@ export default function CreatorsPage() {
     const params = new URLSearchParams();
     if (debouncedSearch) params.append("search", debouncedSearch);
     if (currentPage > 1) params.append("page", currentPage);
+    if (creatorStatusFilter === "banned") params.append("is_banned", "true");
 
     axiosInstance.get(`/creators/?${params.toString()}`)
       .then((res) => {
         if (!mounted) return;
-        setCreators(res.data?.data || []);
+        const fetchedCreators = res.data?.data || [];
+        const decoratedCreators = fetchedCreators.map(c => ({
+          ...c,
+          is_banned: c.is_banned !== undefined ? c.is_banned : (creatorStatusFilter === "banned")
+        }));
+        setCreators(decoratedCreators);
         const pagination = res.data?.pagination;
         if (pagination) setTotalPages(pagination.total_pages || 1);
         else setTotalPages(1);
@@ -80,7 +92,7 @@ export default function CreatorsPage() {
       .finally(() => mounted && setLoading(false));
 
     return () => { mounted = false; };
-  }, [debouncedSearch, currentPage, activeTab]);
+  }, [debouncedSearch, currentPage, activeTab, creatorStatusFilter]);
 
   // Fetch Applications (when tab is applications)
   useEffect(() => {
@@ -182,6 +194,31 @@ export default function CreatorsPage() {
      return <span className="badge bg-secondary">{status}</span>;
   };
 
+  // === Ban / Unban Handler ===
+  const handleBanUnban = async (userId, action) => {
+    if (action === "ban" && !banReason.trim()) {
+      alert("Please provide a reason for banning this creator.");
+      return;
+    }
+    setBanLoading(true);
+    try {
+      const payload = { action };
+      if (action === "ban") payload.reason = banReason;
+      await axiosInstance.post(`/users/${userId}/ban-creator/`, payload);
+      alert(`Creator ${action === "ban" ? "banned" : "unbanned"} successfully!`);
+      setBanTarget(null);
+      setBanReason("");
+      // Remove the creator from the current list since they'll move to the other filter
+      setCreators(prev => prev.filter(c => c.id !== userId));
+    } catch (err) {
+      console.error(err);
+      const msg = err?.response?.data?.message || `Failed to ${action} creator.`;
+      alert(msg);
+    } finally {
+      setBanLoading(false);
+    }
+  };
+
   return (
     <div className="container py-4">
       <div className="mb-4 d-flex justify-content-between align-items-center">
@@ -221,16 +258,24 @@ export default function CreatorsPage() {
       {/* ===================== CREATORS TAB ===================== */}
       {activeTab === "creators" && (
         <>
-          <div className="d-flex justify-content-between align-items-center mb-3">
+          <div className="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
             <h5 className="fw-bold mb-0">Platform Creators</h5>
-            <input
-              type="text"
-              placeholder="Search creators by name..."
-              className="form-control form-control-sm"
-              style={{ width: 260 }}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+            <div className="d-flex align-items-center gap-3">
+              <div className="btn-group shadow-sm">
+                <input type="radio" className="btn-check" name="creatorStatus" id="statusActive" autoComplete="off" checked={creatorStatusFilter === "active"} onChange={() => { setCreatorStatusFilter("active"); setCurrentPage(1); }} />
+                <label className="btn btn-outline-primary btn-sm px-4" htmlFor="statusActive">Active</label>
+                <input type="radio" className="btn-check" name="creatorStatus" id="statusBanned" autoComplete="off" checked={creatorStatusFilter === "banned"} onChange={() => { setCreatorStatusFilter("banned"); setCurrentPage(1); }} />
+                <label className="btn btn-outline-danger btn-sm px-4" htmlFor="statusBanned">Banned</label>
+              </div>
+              <input
+                type="text"
+                placeholder="Search creators by name..."
+                className="form-control form-control-sm"
+                style={{ width: 220 }}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
           </div>
 
           {message && <div className="alert alert-info py-2 small text-center">{message}</div>}
@@ -243,62 +288,94 @@ export default function CreatorsPage() {
                   <th className="py-3">Name</th>
                   <th className="py-3">Bio</th>
                   <th className="py-3">Recipes</th>
+                  <th className="py-3">Status</th>
                   <th className="py-3 text-end px-4">Action</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr>
-                    <td colSpan="5" className="text-center py-5">
+                    <td colSpan="6" className="text-center py-5">
                       <div className="spinner-border text-primary" role="status" />
                     </td>
                   </tr>
                 ) : creators.length > 0 ? (
                   creators.map((c) => (
-                    <tr key={c.id}>
+                    <tr key={c.id} className={c.is_banned ? "table-danger" : ""}>
                       <td className="px-4">
                         <img
                           src={c.profile_picture_url || "https://via.placeholder.com/45"}
                           alt={c.creator_name}
                           className="rounded-circle shadow-sm"
-                          style={{ width: 45, height: 45, objectFit: "cover" }}
+                          style={{ width: 45, height: 45, objectFit: "cover", opacity: c.is_banned ? 0.5 : 1 }}
                         />
                       </td>
                       <td className="fw-bold text-dark">{c.creator_name}</td>
-                      <td style={{ maxWidth: 350, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={c.description}>
+                      <td style={{ maxWidth: 300, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={c.description}>
                         {c.description || <span className="text-muted fst-italic">No bio</span>}
                       </td>
                       <td><span className="badge bg-primary rounded-pill px-3">{c.total_recipes}</span></td>
+                      <td>
+                        {c.is_banned ? (
+                          <span className="badge bg-danger rounded-pill px-3">Banned</span>
+                        ) : (
+                          <span className="badge bg-success rounded-pill px-3">Active</span>
+                        )}
+                      </td>
                       <td className="text-end px-4">
-                        <Link to={`/creators/${c.id}`} className="btn btn-sm btn-outline-dark rounded-pill px-3">
-                          View Profile
-                        </Link>
+                        <div className="d-flex gap-2 justify-content-end">
+                          <Link to={`/creators/${c.id}`} state={{ is_banned: c.is_banned }} className="btn btn-sm btn-outline-dark rounded-pill px-3">
+                            View
+                          </Link>
+                          {c.is_banned ? (
+                            <button
+                              className="btn btn-sm btn-outline-success rounded-pill px-3"
+                              onClick={() => handleBanUnban(c.id, "unban")}
+                              disabled={banLoading}
+                            >
+                              Unban
+                            </button>
+                          ) : (
+                            <button
+                              className="btn btn-sm btn-outline-danger rounded-pill px-3"
+                              onClick={() => { setBanTarget(c); setBanReason(""); }}
+                            >
+                              Ban
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))
                 ) : (
-                  <tr><td colSpan="5" className="text-center text-muted py-5">No creators found.</td></tr>
+                  <tr><td colSpan="6" className="text-center text-muted py-5">No creators found.</td></tr>
                 )}
               </tbody>
             </table>
           </div>
 
           {totalPages > 1 && (
-            <nav className="d-flex justify-content-center mt-4">
-              <ul className="pagination pagination-sm mb-0">
-                <li className={`page-item ${currentPage === 1 ? "disabled" : ""}`}>
-                  <button className="page-link shadow-sm" onClick={() => goToPage(currentPage - 1)}>Prev</button>
-                </li>
-                {[...Array(totalPages).keys()].map((n) => (
-                  <li key={n} className={`page-item ${currentPage === n + 1 ? "active" : ""}`}>
-                    <button className="page-link shadow-sm" onClick={() => goToPage(n + 1)}>{n + 1}</button>
-                  </li>
-                ))}
-                <li className={`page-item ${currentPage === totalPages ? "disabled" : ""}`}>
-                  <button className="page-link shadow-sm" onClick={() => goToPage(currentPage + 1)}>Next</button>
-                </li>
-              </ul>
-            </nav>
+            <div className="modern-pagination">
+              <button
+                className="pagination-btn prev-next"
+                onClick={() => goToPage(currentPage - 1)}
+                disabled={currentPage === 1}
+              >
+                Prev
+              </button>
+
+              <span className="text-muted fw-semibold px-3 small">
+                Page {currentPage} of {totalPages}
+              </span>
+
+              <button
+                className="pagination-btn prev-next"
+                onClick={() => goToPage(currentPage + 1)}
+                disabled={currentPage === totalPages}
+              >
+                Next
+              </button>
+            </div>
           )}
         </>
       )}
@@ -568,6 +645,75 @@ export default function CreatorsPage() {
                       )}
                    </div>
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ===================== BAN CREATOR MODAL ===================== */}
+      {banTarget && (
+        <div className="modal show d-block" tabIndex="-1" style={{ backgroundColor: "rgba(0,0,0,0.6)" }}>
+          <div className="modal-dialog modal-dialog-centered">
+            <div className="modal-content border-0 shadow-lg overflow-hidden">
+              <div className="modal-header bg-danger text-white border-0 py-3 px-4">
+                <h5 className="modal-title fw-bold mb-0">
+                  <span className="me-2">🚫</span> Ban Creator
+                </h5>
+                <button
+                  type="button"
+                  className="btn-close btn-close-white"
+                  onClick={() => { setBanTarget(null); setBanReason(""); }}
+                  disabled={banLoading}
+                ></button>
+              </div>
+              <div className="modal-body p-4">
+                <div className="d-flex align-items-center gap-3 mb-4 p-3 bg-light rounded">
+                  <img
+                    src={banTarget.profile_picture_url || "https://via.placeholder.com/50"}
+                    alt={banTarget.creator_name}
+                    className="rounded-circle shadow-sm"
+                    style={{ width: 50, height: 50, objectFit: "cover" }}
+                  />
+                  <div>
+                    <h6 className="fw-bold mb-0">{banTarget.creator_name}</h6>
+                    <small className="text-muted">{banTarget.total_recipes} recipes will be hidden</small>
+                  </div>
+                </div>
+
+                <div className="alert alert-warning border-0 shadow-sm small mb-3">
+                  <strong>⚠️ Warning:</strong> Banning this creator will hide all their recipes from the platform. This action can be reversed by unbanning.
+                </div>
+
+                <label className="form-label fw-semibold">Reason for Ban <span className="text-danger">*</span></label>
+                <textarea
+                  className="form-control"
+                  rows="3"
+                  placeholder="Explain why this creator is being banned..."
+                  value={banReason}
+                  onChange={(e) => setBanReason(e.target.value)}
+                  disabled={banLoading}
+                ></textarea>
+              </div>
+              <div className="modal-footer border-0 px-4 pb-4 pt-0">
+                <button
+                  className="btn btn-light border px-4"
+                  onClick={() => { setBanTarget(null); setBanReason(""); }}
+                  disabled={banLoading}
+                >
+                  Cancel
+                </button>
+                <button
+                  className="btn btn-danger fw-bold px-4"
+                  onClick={() => handleBanUnban(banTarget.id, "ban")}
+                  disabled={banLoading || !banReason.trim()}
+                >
+                  {banLoading ? (
+                    <><span className="spinner-border spinner-border-sm me-2" role="status"></span>Banning...</>
+                  ) : (
+                    "Confirm Ban"
+                  )}
+                </button>
               </div>
             </div>
           </div>
