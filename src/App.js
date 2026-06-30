@@ -46,6 +46,7 @@ import AiUsageStatsPage from "./pages/AiUsageStatsPage";
 import ImageLibrary from "./pages/Imagelibrary";
 import CreatorsPage from "./pages/CreatorsPage";
 import CreatorDetailPage from "./pages/CreatorDetailPage";
+import AppFeedbackPage from "./pages/AppFeedbackPage";
 
 // small helper for "/" route to preserve your existing logic
 function LoginOrRedirect() {
@@ -289,6 +290,16 @@ function AppRoutes() {
               element={
                 <PrivateRoute>
                   <FeedAdminPage />
+                </PrivateRoute>
+              }
+            />
+
+            {/* App Feedback */}
+            <Route
+              path="/feedback"
+              element={
+                <PrivateRoute>
+                  <AppFeedbackPage />
                 </PrivateRoute>
               }
             />

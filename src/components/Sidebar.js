@@ -15,14 +15,13 @@ import {
   Newspaper,
   ShieldCheck,
   BarChart3,
-  UserCog,
-  KeyRound,
   LogOut,
   ChevronDown,
   Menu,
   X,
   Users,
   Star,
+  MessageSquare,
 } from "lucide-react";
 import "./Sidebar.css";
 
@@ -45,13 +44,14 @@ const contentItems = [
   { to: "/creators", label: "Creators", icon: Star },
   { to: "/feed-admin", label: "Feed Admin", icon: Newspaper },
   { to: "/users", label: "Users", icon: Users },
+  { to: "/feedback", label: "App Feedback", icon: MessageSquare },
 ];
 
 const adminItems = [
   { to: "/admin", label: "Dashboard", icon: BarChart3 },
   { to: "/ai", label: "Gemini Stats", icon: ShieldCheck },
-  { to: "/change-role", label: "Change Role", icon: UserCog },
-  { to: "/change-password", label: "Change Password", icon: KeyRound },
+  // { to: "/change-role", label: "Change Role", icon: UserCog },
+  // { to: "/change-password", label: "Change Password", icon: KeyRound },
 ];
 
 export default function Sidebar() {
@@ -127,15 +127,6 @@ export default function Sidebar() {
 
         {/* Navigation */}
         <nav className="sidebar-nav">
-          <span className="sidebar-section-label">Main</span>
-          {navItems.map(renderLink)}
-
-          <span className="sidebar-section-label">Marketing</span>
-          {advertItems.map(renderLink)}
-
-          <span className="sidebar-section-label">Content</span>
-          {contentItems.map(renderLink)}
-
           {/* Admin group */}
           {isAdmin && (
             <>
@@ -157,6 +148,15 @@ export default function Sidebar() {
               </div>
             </>
           )}
+
+          <span className="sidebar-section-label">Main</span>
+          {navItems.map(renderLink)}
+
+          <span className="sidebar-section-label">Marketing</span>
+          {advertItems.map(renderLink)}
+
+          <span className="sidebar-section-label">Content</span>
+          {contentItems.map(renderLink)}
         </nav>
 
         {/* Footer */}
