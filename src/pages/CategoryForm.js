@@ -1,199 +1,423 @@
-// src/pages/CategoryForm.js
-import React, { useEffect, useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
+import { useNavigate, useParams, Link } from "react-router-dom";
+import axios from "axios";
+import {
+  ArrowLeft,
+  Upload,
+  Image as ImageIcon,
+  CheckCircle2,
+  AlertCircle,
+  X,
+} from "lucide-react";
 import { getAxiosInstance } from "../api";
-import { useNavigate, useParams } from "react-router-dom";
-import CloudinaryService from "../components/cloudinaryService";
+import { normalizeFoodImage, deduplicateGalleryItems } from "./Imagelibrary";
+import "./Categories.css";
 
-/**
- * Use this component for both create and edit.
- * If params.id exists -> edit mode.
- */
+const CLOUD_NAME = "djlc333s2";
+const UPLOAD_PRESET = "food-admin";
+const CATALOG_CACHE_KEY = "cookeaze_recipes_catalog_v5";
+
 export default function CategoryForm() {
-  const axios = getAxiosInstance();
-  const navigate = useNavigate();
-  const { id } = useParams(); // undefined when creating
+  const { id } = useParams();
   const isEdit = Boolean(id);
+  const navigate = useNavigate();
+  const api = useMemo(() => getAxiosInstance(), []);
 
-  const [category, setCategory] = useState({
-    category_name: "",
-    image_url: "",
-  });
+  const [categoryName, setCategoryName] = useState("");
+  const [imageUrl, setImageUrl] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(isEdit);
-  const [status, setStatus] = useState(null);
-  const [imageUploading, setImageUploading] = useState(false);
+  const [error, setError] = useState(null);
+
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryItems, setLibraryItems] = useState([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [libraryQuery, setLibraryQuery] = useState("");
 
   useEffect(() => {
     if (!isEdit) return;
-    (async () => {
-      setLoading(true);
-      try {
-        const res = await axios.get(`/categories/${id}/`);
-        setCategory(res.data?.data ?? {});
-      } catch (err) {
-        console.error(err);
-        setStatus({ type: "danger", text: "Failed to load category." });
-      } finally {
-        setLoading(false);
-      }
-    })();
-    // eslint-disable-next-line
-  }, [id]);
+    setLoading(true);
+    api
+      .get(`/categories/${id}/`)
+      .then((res) => {
+        const data = res.data?.data ?? res.data;
+        setCategoryName(data?.category_name || data?.name || "");
+        setImageUrl(data?.image_url || "");
+      })
+      .catch((err) => {
+        setError(err.response?.data?.message || "Failed to load category.");
+      })
+      .finally(() => setLoading(false));
+  }, [api, id, isEdit]);
 
-  const isValidUrl = (s) => {
-    if (!s) return true; // allow empty
-    try {
-      new URL(s);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
-  const handleImageUpload = async (e) => {
-    const file = e.target.files[0];
+  const handleFileChange = async (e) => {
+    const file = e.target.files?.[0];
     if (!file) return;
 
-    setImageUploading(true);
-    setStatus(null);
+    setUploading(true);
+    setError(null);
+
     try {
-      const url = await CloudinaryService.uploadFile(file, { folder: "categories" });
-      setCategory((prev) => ({ ...prev, image_url: url }));
-      setStatus({ type: "success", text: "Image uploaded successfully." });
-    } catch (err) {
-      console.error(err);
-      setStatus({ type: "danger", text: "Failed to upload image." });
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("upload_preset", UPLOAD_PRESET);
+
+      const res = await axios.post(
+        `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
+        formData
+      );
+      if (res.data?.secure_url) {
+        setImageUrl(res.data.secure_url);
+      }
+    } catch {
+      setError("Failed to upload image. Please try again.");
     } finally {
-      setImageUploading(false);
+      setUploading(false);
+      e.target.value = "";
     }
   };
 
-  const onSubmit = async (e) => {
-    e.preventDefault();
-    setStatus(null);
+  const openLibraryPicker = async () => {
+    setLibraryOpen(true);
+    if (libraryItems.length > 0) return;
+    setLibraryLoading(true);
+    try {
+      const res = await api.get("/food-images/?page_size=100");
+      const raw =
+        res.data?.results ||
+        res.data?.data ||
+        (Array.isArray(res.data) ? res.data : []);
+      const normalized = deduplicateGalleryItems(
+        raw.map(normalizeFoodImage).filter((item) => item.imageUrl)
+      );
+      setLibraryItems(normalized);
+    } catch {
+      setError("Could not load image library.");
+    } finally {
+      setLibraryLoading(false);
+    }
+  };
 
-    if (!category.category_name || category.category_name.trim() === "") {
-      setStatus({ type: "danger", text: "Category name is required." });
+  const filteredLibraryItems = useMemo(() => {
+    const q = libraryQuery.trim().toLowerCase();
+    if (!q) return libraryItems;
+    return libraryItems.filter(
+      (item) =>
+        item.title?.toLowerCase().includes(q) ||
+        (Array.isArray(item.tags) &&
+          item.tags.some((t) => String(t).toLowerCase().includes(q)))
+    );
+  }, [libraryItems, libraryQuery]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const trimmed = categoryName.trim();
+    if (!trimmed) {
+      setError("Category name is required.");
       return;
     }
-    if (!isValidUrl(category.image_url)) {
-      setStatus({ type: "danger", text: "Image URL is not valid." });
-      return;
-    }
+
+    setSaving(true);
+    setError(null);
 
     try {
+      const payload = {
+        category_name: trimmed,
+        image_url: imageUrl.trim() || "",
+      };
+
       if (isEdit) {
-        await axios.put(`/categories/${id}/`, category);
-        setStatus({ type: "success", text: "Category updated." });
-        navigate(`/categories/${id}`);
+        await api.put(`/categories/${id}/`, payload);
       } else {
-        await axios.post("/categories/", category);
-        setStatus({ type: "success", text: "Category created." });
-        navigate("/categories");
+        await api.post("/categories/", payload);
       }
+
+      try {
+        sessionStorage.removeItem(CATALOG_CACHE_KEY);
+      } catch {
+        // ignore
+      }
+
+      navigate("/categories");
     } catch (err) {
-      console.error(err);
-      // try to display server validation errors if present
-      const resp = err?.response?.data;
-      const msg =
-        resp?.message || (resp?.data ? JSON.stringify(resp.data) : err.message);
-      setStatus({ type: "danger", text: `Failed: ${msg}` });
+      setError(err.response?.data?.message || "Failed to save category.");
+    } finally {
+      setSaving(false);
     }
   };
 
   return (
-    <div className="container py-4">
-      <div className="d-flex justify-content-between align-items-center mb-3">
-        <h3>{isEdit ? "Edit Category" : "Create Category"}</h3>
+    <div className="cat-page">
+      <div className="cat-header">
+        <div className="cat-header-left">
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Link to="/categories" className="cat-btn cat-btn-secondary cat-btn-sm">
+              <ArrowLeft size={14} />
+              Back to Categories
+            </Link>
+          </div>
+          <h1 className="cat-title" style={{ marginTop: 6 }}>
+            {isEdit ? "Edit Category" : "Create New Category"}
+          </h1>
+          <p className="cat-subtitle">
+            Configure the category title and cover photo displayed across Cookeaze.
+          </p>
+        </div>
       </div>
 
-      {status && (
-        <div className={`alert alert-${status.type}`}>{status.text}</div>
+      {error && (
+        <div className="cat-toast error">
+          <div className="cat-toast-left">
+            <AlertCircle size={17} />
+            <span>{error}</span>
+          </div>
+          <button
+            type="button"
+            className="cat-toast-close"
+            onClick={() => setError(null)}
+          >
+            <X size={15} />
+          </button>
+        </div>
       )}
 
       {loading ? (
-        <div className="text-center py-4">
-          <div className="spinner-border text-primary" role="status"></div>
-        </div>
-      ) : (
-        <form onSubmit={onSubmit} className="card p-4 shadow-sm">
-          <div className="mb-3">
-            <label className="form-label">Category Name</label>
-            <input
-              type="text"
-              className="form-control"
-              value={category.category_name || ""}
-              onChange={(e) =>
-                setCategory({ ...category, category_name: e.target.value })
-              }
-              required
+        <div className="cat-panel-grid">
+          <div className="cat-panel">
+            <div
+              className="cat-shimmer"
+              style={{ width: 180, height: 20, marginBottom: 8 }}
+            />
+            <div
+              className="cat-shimmer"
+              style={{ width: 280, height: 13, marginBottom: 20 }}
+            />
+            <div className="cat-field">
+              <div
+                className="cat-shimmer"
+                style={{ width: 110, height: 13, marginBottom: 6 }}
+              />
+              <div
+                className="cat-shimmer"
+                style={{ width: "100%", height: 40 }}
+              />
+            </div>
+            <div className="cat-field">
+              <div
+                className="cat-shimmer"
+                style={{ width: 120, height: 13, marginBottom: 6 }}
+              />
+              <div
+                className="cat-shimmer"
+                style={{ width: "100%", height: 40 }}
+              />
+            </div>
+            <div
+              className="cat-shimmer"
+              style={{ width: "100%", height: 68, borderRadius: 11 }}
             />
           </div>
+          <div className="cat-panel">
+            <div
+              className="cat-shimmer"
+              style={{ width: 140, height: 18, marginBottom: 8 }}
+            />
+            <div
+              className="cat-shimmer"
+              style={{ width: 210, height: 13, marginBottom: 18 }}
+            />
+            <div
+              className="cat-shimmer"
+              style={{ width: "100%", height: 195, borderRadius: 12 }}
+            />
+          </div>
+        </div>
+      ) : (
+        <form className="cat-panel-grid" onSubmit={handleSubmit}>
+          <div className="cat-panel">
+            <h2 className="cat-panel-title">Category Information</h2>
+            <p className="cat-panel-sub">
+              Provide a concise, recognizable category name and cover image.
+            </p>
 
-          <div className="mb-3">
-            <label className="form-label">Image (Upload or URL)</label>
-            <div className="d-flex gap-2 align-items-center mb-2">
+            <div className="cat-field">
+              <label className="cat-label">Category Name *</label>
+              <input
+                type="text"
+                className="cat-input"
+                placeholder="e.g. Nigerian Soups, Quick Breakfast, Desserts..."
+                value={categoryName}
+                onChange={(e) => setCategoryName(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="cat-field">
+              <label className="cat-label">Cover Image URL</label>
               <input
                 type="url"
-                className="form-control"
-                value={category.image_url || ""}
-                onChange={(e) =>
-                  setCategory({ ...category, image_url: e.target.value })
-                }
-                placeholder="https://example.com/image.jpg"
+                className="cat-input"
+                placeholder="Paste image URL or upload below..."
+                value={imageUrl}
+                onChange={(e) => setImageUrl(e.target.value)}
               />
-              <span className="text-muted small fw-bold mx-1">OR</span>
-              <input
-                type="file"
-                accept="image/*"
-                id="categoryImageUpload"
-                style={{ display: "none" }}
-                onChange={handleImageUpload}
-              />
-              <label
-                htmlFor="categoryImageUpload"
-                className={`btn btn-outline-secondary text-nowrap mb-0 ${
-                  imageUploading ? "disabled" : ""
-                }`}
-                style={{ cursor: imageUploading ? "not-allowed" : "pointer" }}
-              >
-                {imageUploading ? (
-                  <>
-                    <span className="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>
-                    Uploading...
-                  </>
-                ) : (
-                  "Upload Image"
-                )}
-              </label>
             </div>
-            <div className="form-text">
-              Leave blank if no image. If provided, must be a valid URL.
-            </div>
-            {category.image_url && isValidUrl(category.image_url) && (
-              <div className="mt-2">
-                <img
-                  src={category.image_url}
-                  alt="Category Preview"
-                  className="img-thumbnail"
-                  style={{ maxHeight: "120px", objectFit: "cover" }}
-                />
+
+            <div className="cat-upload-zone">
+              <div>
+                <div style={{ fontWeight: 600, fontSize: "0.85rem", color: "#0f172a" }}>
+                  Category Cover Artwork
+                </div>
+                <div style={{ fontSize: "0.78rem", color: "#64748b" }}>
+                  Upload from your device or choose from the Cookeaze Image Library.
+                </div>
               </div>
-            )}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <label
+                  className="cat-btn cat-btn-soft cat-btn-sm"
+                  style={{ cursor: "pointer", margin: 0 }}
+                >
+                  <Upload size={14} />
+                  {uploading ? "Uploading..." : "Upload File"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileChange}
+                    disabled={uploading}
+                    style={{ display: "none" }}
+                  />
+                </label>
+
+                <button
+                  type="button"
+                  className="cat-btn cat-btn-secondary cat-btn-sm"
+                  onClick={openLibraryPicker}
+                >
+                  <ImageIcon size={14} />
+                  Choose from Library
+                </button>
+              </div>
+            </div>
+
+            <div
+              style={{
+                marginTop: 20,
+                display: "flex",
+                justifyContent: "flex-end",
+                gap: 10,
+              }}
+            >
+              <Link to="/categories" className="cat-btn cat-btn-secondary">
+                Cancel
+              </Link>
+              <button
+                type="submit"
+                className="cat-btn cat-btn-primary"
+                disabled={saving || uploading}
+              >
+                <CheckCircle2 size={15} />
+                {saving
+                  ? "Saving..."
+                  : isEdit
+                  ? "Update Category"
+                  : "Create Category"}
+              </button>
+            </div>
           </div>
 
-          <div className="d-flex gap-2">
-            <button className="btn btn-primary" type="submit">
-              {isEdit ? "Save Changes" : "Create"}
-            </button>
-            <button
-              className="btn btn-outline-secondary"
-              type="button"
-              onClick={() => navigate(-1)}
-            >
-              Cancel
-            </button>
+          {/* Right Live Preview Card */}
+          <div className="cat-panel">
+            <h2 className="cat-panel-title">Live Card Preview</h2>
+            <p className="cat-panel-sub">How this category appears in the directory</p>
+
+            <div className="cat-card" style={{ pointerEvents: "none" }}>
+              <div className="cat-card-top">
+                <div className="cat-card-thumb-wrap">
+                  {imageUrl ? (
+                    <img
+                      src={imageUrl}
+                      alt={categoryName || "Preview"}
+                      className="cat-card-thumb"
+                    />
+                  ) : (
+                    <div className="cat-card-thumb-placeholder">
+                      <ImageIcon size={20} />
+                    </div>
+                  )}
+                </div>
+                <div className="cat-card-info">
+                  <h3 className="cat-card-title">
+                    {categoryName.trim() || "Untitled Category"}
+                  </h3>
+                  <div className="cat-card-meta">
+                    <span className="cat-card-status-dot" />
+                    <span>Active category</span>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
         </form>
+      )}
+
+      {libraryOpen && (
+        <div
+          className="cat-modal-backdrop"
+          onClick={() => setLibraryOpen(false)}
+        >
+          <div
+            className="cat-modal-card wide"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="cat-modal-header">
+              <h3>Choose Category Cover from Library</h3>
+              <button
+                type="button"
+                className="cat-modal-close"
+                onClick={() => setLibraryOpen(false)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="cat-modal-body">
+              <input
+                type="text"
+                className="cat-input"
+                placeholder="Search food images by name or tag..."
+                value={libraryQuery}
+                onChange={(e) => setLibraryQuery(e.target.value)}
+              />
+
+              {libraryLoading ? (
+                <div className="cat-empty" style={{ marginTop: 12 }}>
+                  <p>Loading food image library...</p>
+                </div>
+              ) : filteredLibraryItems.length === 0 ? (
+                <div className="cat-empty" style={{ marginTop: 12 }}>
+                  <p>No matching images found in library.</p>
+                </div>
+              ) : (
+                <div className="cat-lib-grid">
+                  {filteredLibraryItems.map((item) => (
+                    <button
+                      type="button"
+                      key={item.id || item.imageUrl}
+                      className="cat-lib-item"
+                      onClick={() => {
+                        setImageUrl(item.imageUrl);
+                        setLibraryOpen(false);
+                      }}
+                    >
+                      <img src={item.imageUrl} alt={item.title || "Food"} />
+                      <span>{item.title || "Food Image"}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

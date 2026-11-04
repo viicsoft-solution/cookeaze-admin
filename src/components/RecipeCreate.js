@@ -1,1115 +1,1152 @@
-"use client";
-
-// Modern, clean design with better visual hierarchy and improved user experience
-
-import { useState, useEffect, useRef } from "react";
-import axios from "axios";
+// src/components/RecipeCreate.js
+import React, { useEffect, useState, useMemo, useRef, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
+import {
+  ArrowLeft,
+  Image as ImageIcon,
+  Upload,
+  Plus,
+  Trash2,
+  Check,
+  RotateCcw,
+  X,
+} from "lucide-react";
+import { axiosInstance } from "../api";
 import CloudinaryService from "./cloudinaryService";
+import {
+  normalizeFoodImage,
+  deduplicateGalleryItems,
+} from "../pages/Imagelibrary";
+import "./RecipeCreate.css";
 
-const API_BASE = "https://api.cookeaze.app/api/recipes/";
+const CATEGORIES_URL = "https://api.cookeaze.app/api/categories/";
+const RECIPES_URL = "https://api.cookeaze.app/api/recipes/";
+const FOOD_IMAGES_URL = "https://api.cookeaze.app/api/food-images/";
+const IMAGES_CACHE_KEY = "cookeaze_food_images_catalog_v3";
 
-const emptyIngredient = () => ({ name: "", quantity: "", unit: "" });
-const emptyStep = (num) => ({
-  step_number: num,
-  description: "",
-  duration: 0,
-  step_type: "prep",
-});
+const COMMON_UNITS = [
+  "g",
+  "kg",
+  "ml",
+  "L",
+  "tbsp",
+  "tsp",
+  "cup",
+  "pcs",
+  "oz",
+  "lb",
+  "clove",
+  "pinch",
+];
+
+const INITIAL_FORM = {
+  name: "",
+  categories_id: [],
+  image_url: "",
+  time_taken: "",
+  total_time: "",
+  servings: "",
+  is_special: false,
+  nutrition: {
+    calories: "",
+    fat: "",
+    carbs: "",
+    protein: "",
+  },
+  ingredients: [{ name: "", unit: "", quantity: "" }],
+  steps: [{ step_number: 1, instruction: "", process_type: "prep" }],
+};
+
+function getCategoryLabel(cat) {
+  if (!cat) return "";
+  return String(cat.category_name || cat.name || cat.title || "").trim();
+}
+
+function extractCategories(resData) {
+  if (!resData) return [];
+  const root = resData.data !== undefined ? resData.data : resData;
+  if (Array.isArray(root)) return root;
+  if (Array.isArray(root?.results)) return root.results;
+  return [];
+}
+
+function extractFoodImagesPage(resData) {
+  if (!resData) return { results: [], count: 0 };
+  const root = resData.data !== undefined ? resData.data : resData;
+  if (Array.isArray(root)) {
+    return { results: root, count: root.length };
+  }
+  const results = Array.isArray(root?.results)
+    ? root.results
+    : Array.isArray(root?.images)
+    ? root.images
+    : Array.isArray(resData?.results)
+    ? resData.results
+    : [];
+  const count =
+    typeof root?.count === "number"
+      ? root.count
+      : typeof resData?.count === "number"
+      ? resData.count
+      : results.length;
+  return { results, count };
+}
+
+function getCachedFoodImages() {
+  try {
+    const raw = sessionStorage.getItem(IMAGES_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed?.items) && parsed.items.length > 0) {
+      return parsed.items;
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return [];
+}
 
 export default function RecipeCreate() {
-  const [name, setName] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
-  const [description, setDescription] = useState("");
-  const [totalTime, setTotalTime] = useState(30);
-  const [servings, setServings] = useState(2);
-  const [isExclusive, setIsExclusive] = useState(false);
-  const [calories, setCalories] = useState("");
-  const [country, setCountry] = useState("");
-  const [price, setPrice] = useState("");
-  const [ingredients, setIngredients] = useState([emptyIngredient()]);
-  const [steps, setSteps] = useState([emptyStep(1)]);
-  const [submitting, setSubmitting] = useState(false);
-  const [status, setStatus] = useState(null);
-
-  // NEW: Upload states
-  const [uploadingImage, setUploadingImage] = useState(false);
+  const navigate = useNavigate();
   const fileInputRef = useRef(null);
 
-  const token =
-    typeof window !== "undefined" ? localStorage.getItem("token") : null;
-
-  const axiosInstance = axios.create({
-    headers: {
-      accept: "application/json",
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-  });
-
-  const addIngredient = () => setIngredients((s) => [...s, emptyIngredient()]);
-  const updateIngredient = (i, field, value) => {
-    setIngredients((s) =>
-      s.map((ing, idx) => (idx === i ? { ...ing, [field]: value } : ing)),
-    );
-  };
-  const removeIngredient = (i) =>
-    setIngredients((s) => s.filter((_, idx) => idx !== i));
-
-  const addStep = () => setSteps((s) => [...s, emptyStep(s.length + 1)]);
-  const updateStep = (i, field, value) => {
-    setSteps((s) => {
-      const next = s.map((st, idx) =>
-        idx === i ? { ...st, [field]: value } : st,
-      );
-      return next.map((st, idx) => ({ ...st, step_number: idx + 1 }));
-    });
-  };
-  const removeStep = (i) => {
-    setSteps((s) => {
-      const next = s.filter((_, idx) => idx !== i);
-      return next.map((st, idx) => ({ ...st, step_number: idx + 1 }));
-    });
-  };
-
-  // Categories state - now supports multiple selections
+  const [form, setForm] = useState(INITIAL_FORM);
   const [categories, setCategories] = useState([]);
-  const [selectedCategories, setSelectedCategories] = useState([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
 
-  // Fetch categories on load
-  useEffect(() => {
-    const fetchCategories = async () => {
-      try {
-        const res = await axiosInstance.get(
-          "https://api.cookeaze.app/api/categories/",
-        );
+  // Image Upload & Library Picker States
+  const [uploadingImage, setUploadingImage] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryImages, setLibraryImages] = useState([]);
+  const [libraryCount, setLibraryCount] = useState(0);
+  const [libraryPage, setLibraryPage] = useState(1);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [librarySearch, setLibrarySearch] = useState("");
 
-        // Access the correct array inside `data`
-        const catArray = res.data?.data || [];
+  // Submission & Feedback
+  const [submitting, setSubmitting] = useState(false);
+  const [banner, setBanner] = useState(null);
 
-        setCategories(catArray);
-      } catch (err) {
-        console.error("Failed to fetch categories:", err);
-        setCategories([]); // fallback to empty array
-      }
-    };
-    fetchCategories();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  const showBanner = useCallback((text, type = "success") => {
+    setBanner({ text, type });
   }, []);
 
-  // Toggle category selection
-  const toggleCategory = (categoryName) => {
-    setSelectedCategories((prev) => {
-      if (prev.includes(categoryName)) {
-        return prev.filter((c) => c !== categoryName);
-      } else {
-        return [...prev, categoryName];
+  // Load Categories
+  const fetchCategories = useCallback(async () => {
+    try {
+      setCategoriesLoading(true);
+      const res = await axiosInstance.get(CATEGORIES_URL);
+      const list = extractCategories(res.data);
+      const seen = new Set();
+      const deduped = [];
+      for (let i = 0; i < list.length; i += 1) {
+        const c = list[i];
+        const label = getCategoryLabel(c);
+        if (c && c.id && label && !seen.has(String(c.id))) {
+          seen.add(String(c.id));
+          deduped.push({ ...c, displayName: label });
+        }
       }
+      setCategories(deduped);
+    } catch (err) {
+      console.error("Error loading categories:", err);
+      showBanner("Could not load categories.", "error");
+    } finally {
+      setCategoriesLoading(false);
+    }
+  }, [showBanner]);
+
+  useEffect(() => {
+    fetchCategories();
+  }, [fetchCategories]);
+
+  useEffect(() => {
+    const handleRecover = () => fetchCategories();
+    window.addEventListener("online", handleRecover);
+    window.addEventListener("cookeaze:token-updated", handleRecover);
+    return () => {
+      window.removeEventListener("online", handleRecover);
+      window.removeEventListener("cookeaze:token-updated", handleRecover);
+    };
+  }, [fetchCategories]);
+
+  // Basic Input Handler
+  const handleChange = (e) => {
+    const { name, value, type, checked } = e.target;
+    setForm((prev) => {
+      const updated = {
+        ...prev,
+        [name]: type === "checkbox" ? checked : value,
+      };
+      if (name === "time_taken" && !prev.total_time) {
+        updated.total_time = value;
+      }
+      return updated;
     });
   };
 
-  // NEW: Upload to Cloudinary and set imageUrl
-  const handleImageFileChange = async (e) => {
+  // Category Toggle
+  const toggleCategory = (catId) => {
+    const numId = Number(catId);
+    setForm((prev) => {
+      const exists = prev.categories_id.includes(numId);
+      return {
+        ...prev,
+        categories_id: exists
+          ? prev.categories_id.filter((id) => id !== numId)
+          : [...prev.categories_id, numId],
+      };
+    });
+  };
+
+  // Nutrition Input Handler
+  const handleNutritionChange = (e) => {
+    const { name, value } = e.target;
+    setForm((prev) => ({
+      ...prev,
+      nutrition: {
+        ...prev.nutrition,
+        [name]: value,
+      },
+    }));
+  };
+
+  // Ingredient Handlers
+  const handleIngredientChange = (index, field, value) => {
+    setForm((prev) => {
+      const updated = prev.ingredients.map((item, idx) =>
+        idx === index ? { ...item, [field]: value } : item
+      );
+      return { ...prev, ingredients: updated };
+    });
+  };
+
+  const addIngredient = () => {
+    setForm((prev) => ({
+      ...prev,
+      ingredients: [...prev.ingredients, { name: "", unit: "", quantity: "" }],
+    }));
+  };
+
+  const removeIngredient = (index) => {
+    setForm((prev) => {
+      if (prev.ingredients.length <= 1) {
+        return {
+          ...prev,
+          ingredients: [{ name: "", unit: "", quantity: "" }],
+        };
+      }
+      return {
+        ...prev,
+        ingredients: prev.ingredients.filter((_, idx) => idx !== index),
+      };
+    });
+  };
+
+  // Step Handlers
+  const renumberSteps = (stepsList) =>
+    stepsList.map((step, i) => ({
+      ...step,
+      step_number: i + 1,
+    }));
+
+  const handleStepChange = (index, field, value) => {
+    setForm((prev) => {
+      const updated = prev.steps.map((item, idx) =>
+        idx === index ? { ...item, [field]: value } : item
+      );
+      return { ...prev, steps: updated };
+    });
+  };
+
+  const addStep = () => {
+    setForm((prev) => ({
+      ...prev,
+      steps: [
+        ...prev.steps,
+        {
+          step_number: prev.steps.length + 1,
+          instruction: "",
+          process_type: "cook",
+        },
+      ],
+    }));
+  };
+
+  const removeStep = (index) => {
+    setForm((prev) => {
+      if (prev.steps.length <= 1) {
+        return {
+          ...prev,
+          steps: [{ step_number: 1, instruction: "", process_type: "prep" }],
+        };
+      }
+      const filtered = prev.steps.filter((_, idx) => idx !== index);
+      return { ...prev, steps: renumberSteps(filtered) };
+    });
+  };
+
+  // Cloudinary Upload Handler
+  const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
-
-    // basic validation
-    if (!file.type?.startsWith("image/")) {
-      setStatus({ type: "danger", text: "Please select a valid image file." });
-      e.target.value = "";
-      return;
-    }
-
-    setStatus(null);
     setUploadingImage(true);
+    setBanner(null);
 
     try {
       const uploadedUrl = await CloudinaryService.uploadFile(file, {
-        folder: "cookeaze_uploads/recipes",
+        folder: "cookeaze_recipes",
       });
-
-      setImageUrl(uploadedUrl);
-      setStatus({ type: "success", text: "Image uploaded successfully ✅" });
+      setForm((prev) => ({ ...prev, image_url: uploadedUrl }));
+      showBanner("Image uploaded.");
     } catch (err) {
-      console.error("Cloudinary upload failed:", err);
-      setStatus({
-        type: "danger",
-        text: "Image upload failed. Please try again.",
-      });
-      setImageUrl("");
+      console.error("Image upload error:", err);
+      showBanner("Failed to upload image.", "error");
     } finally {
       setUploadingImage(false);
+      e.target.value = "";
     }
   };
 
-  const validate = () => {
-    if (!name.trim()) {
-      setStatus({ type: "danger", text: "Recipe name is required." });
-      return false;
+  // Fetch Image Library with deduplication, search, and pagination
+  const fetchLibraryPage = useCallback(async (page = 1, query = "") => {
+    const q = query.trim().toLowerCase();
+    setLibraryLoading(true);
+
+    try {
+      // 1. Check if full catalog is cached in sessionStorage for instant filtering
+      const cached = getCachedFoodImages();
+      if (cached.length > 0) {
+        const filtered = q
+          ? cached.filter((item) => {
+              const matchName = String(item.name || "")
+                .toLowerCase()
+                .includes(q);
+              const matchId = String(item.id || "")
+                .toLowerCase()
+                .includes(q);
+              const matchTag = (item.tags || []).some((t) =>
+                String(t).toLowerCase().includes(q)
+              );
+              const matchSyn = (item.synonyms || []).some((s) =>
+                String(s).toLowerCase().includes(q)
+              );
+              return matchName || matchId || matchTag || matchSyn;
+            })
+          : cached;
+
+        const pageSize = 20;
+        const start = (page - 1) * pageSize;
+        setLibraryImages(filtered.slice(start, start + pageSize));
+        setLibraryCount(filtered.length);
+        setLibraryLoading(false);
+        return;
+      }
+
+      // 2. Otherwise query the live API
+      let res;
+      if (q) {
+        try {
+          res = await axiosInstance.get(`${FOOD_IMAGES_URL}search/`, {
+            params: { q: query.trim(), search: query.trim(), page },
+          });
+        } catch {
+          res = await axiosInstance.get(FOOD_IMAGES_URL, {
+            params: { search: query.trim(), page },
+          });
+        }
+      } else {
+        res = await axiosInstance.get(FOOD_IMAGES_URL, {
+          params: { page },
+        });
+      }
+
+      const { results, count } = extractFoodImagesPage(res.data);
+      const normalized = results
+        .map((r) => normalizeFoodImage(r))
+        .filter((item) => item && item.url);
+      const { uniqueItems } = deduplicateGalleryItems(normalized);
+
+      setLibraryImages(uniqueItems);
+      setLibraryCount(count || uniqueItems.length);
+    } catch (err) {
+      console.error("Failed to load image library:", err);
+    } finally {
+      setLibraryLoading(false);
     }
-    if (!imageUrl.trim()) {
-      setStatus({
-        type: "danger",
-        text: "Image is required. Upload an image (or paste a valid URL).",
-      });
-      return false;
-    }
-    if (selectedCategories.length === 0) {
-      setStatus({
-        type: "danger",
-        text: "Please select at least one category.",
-      });
-      return false;
-    }
-    return true;
+  }, []);
+
+  useEffect(() => {
+    if (!libraryOpen) return undefined;
+    const t = setTimeout(() => {
+      fetchLibraryPage(libraryPage, librarySearch);
+    }, 200);
+    return () => clearTimeout(t);
+  }, [libraryOpen, libraryPage, librarySearch, fetchLibraryPage]);
+
+  const openImageLibrary = () => {
+    setLibrarySearch("");
+    setLibraryPage(1);
+    setLibraryOpen(true);
   };
 
+  const validIngredients = useMemo(
+    () =>
+      form.ingredients.filter(
+        (i) =>
+          String(i.name || "").trim() &&
+          String(i.unit || "").trim() &&
+          Number(i.quantity) > 0
+      ),
+    [form.ingredients]
+  );
+
+  const validSteps = useMemo(
+    () => form.steps.filter((s) => String(s.instruction || "").trim()),
+    [form.steps]
+  );
+
+  const selectedCategoryNames = useMemo(
+    () =>
+      categories
+        .filter((c) => form.categories_id.includes(Number(c.id)))
+        .map((c) => c.displayName),
+    [categories, form.categories_id]
+  );
+
+  const handleReset = () => {
+    setForm(INITIAL_FORM);
+    setBanner(null);
+  };
+
+  // Submit Recipe
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setStatus(null);
-    if (!validate()) return;
+    setBanner(null);
+
+    if (!form.name.trim()) {
+      showBanner("Please enter a recipe name.", "error");
+      return;
+    }
+    if (!form.image_url.trim()) {
+      showBanner("Please upload or choose a cover image.", "error");
+      return;
+    }
+    if (form.categories_id.length === 0) {
+      showBanner("Please select at least one category.", "error");
+      return;
+    }
+    if (
+      Number(form.time_taken) <= 0 ||
+      Number(form.total_time) <= 0 ||
+      Number(form.servings) <= 0
+    ) {
+      showBanner(
+        "Please enter valid Prep Time, Total Time, and Servings.",
+        "error"
+      );
+      return;
+    }
+    if (validIngredients.length === 0) {
+      showBanner("Please add at least one complete ingredient.", "error");
+      return;
+    }
+    if (validSteps.length === 0) {
+      showBanner("Please add at least one cooking step.", "error");
+      return;
+    }
 
     setSubmitting(true);
 
     const payload = {
-      name: name.trim(),
-      category: selectedCategories, // Send array of category names (strings)
-      image_url: imageUrl.trim(),
-      description: description.trim(),
-      total_time: Number(totalTime) || 0,
-      servings: Number(servings) || 1,
-      isExclusive: !!isExclusive,
-      calories: calories.trim(),
-      country: country.trim(),
-      price: price.trim(),
-      ingredients_data: ingredients
-        .map((ing) => ({
-          name: ing.name?.trim() || "",
-          quantity: ing.quantity?.trim() || "",
-          unit: ing.unit?.trim() || "",
-        }))
-        .filter((ing) => ing.name),
-      steps_data: steps
-        .map((st, idx) => ({
-          step_number: Number(st.step_number || idx + 1),
-          description: st.description?.trim() || "",
-          duration: Number(st.duration || 0),
-          step_type: st.step_type || "prep",
-        }))
-        .filter((s) => s.description),
+      name: form.name.trim(),
+      categories_id: form.categories_id.map(Number),
+      image_url: form.image_url.trim(),
+      time_taken: Number(form.time_taken),
+      total_time: Number(form.total_time),
+      servings: Number(form.servings),
+      is_special: Boolean(form.is_special),
+      nutrition: {
+        calories: Number(form.nutrition.calories) || 0,
+        fat: Number(form.nutrition.fat) || 0,
+        carbs: Number(form.nutrition.carbs) || 0,
+        protein: Number(form.nutrition.protein) || 0,
+      },
+      ingredients: validIngredients.map((i) => ({
+        name: i.name.trim(),
+        unit: i.unit.trim(),
+        quantity: Number(i.quantity),
+      })),
+      steps: validSteps.map((s, idx) => ({
+        step_number: idx + 1,
+        instruction: s.instruction.trim(),
+        process_type: s.process_type || "prep",
+      })),
     };
 
     try {
-      await axiosInstance.post(API_BASE, payload);
-      setStatus({ type: "success", text: "Recipe created successfully." });
-
-      // reset
-      setName("");
-      setSelectedCategories([]);
-      setImageUrl("");
-      setDescription("");
-      setTotalTime(30);
-      setServings(2);
-      setIsExclusive(false);
-      setCalories("");
-      setCountry("");
-      setPrice("");
-      setIngredients([emptyIngredient()]);
-      setSteps([emptyStep(1)]);
-      if (fileInputRef.current) fileInputRef.current.value = "";
+      await axiosInstance.post(RECIPES_URL, payload);
+      showBanner(`Recipe "${payload.name}" created successfully!`, "success");
+      setForm(INITIAL_FORM);
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err) {
-      console.error("Create failed:", err);
-      const serverMsg =
-        err?.response?.data?.message || err?.response?.data || err.message;
-      setStatus({
-        type: "danger",
-        text: `Failed to create recipe. ${serverMsg}`,
-      });
+      console.error("Create recipe error:", err);
+      const apiErr =
+        err?.response?.data?.message ||
+        err?.response?.data?.detail ||
+        "Failed to create recipe. Please check all fields.";
+      showBanner(String(apiErr), "error");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const styles = {
-    container: {
-      maxWidth: "1400px",
-      margin: "0 auto",
-      padding: "40px 20px",
-      backgroundColor: "#f9f7f4",
-      minHeight: "100vh",
-      fontFamily: "'Geist', sans-serif",
-    },
-    header: {
-      marginBottom: "40px",
-    },
-    title: {
-      fontSize: "32px",
-      fontWeight: "700",
-      color: "#1a1a1a",
-      margin: "0 0 8px 0",
-    },
-    subtitle: {
-      fontSize: "14px",
-      color: "#666",
-      margin: "0",
-    },
-    wrapper: {
-      display: "grid",
-      gridTemplateColumns: "1fr 420px",
-      gap: "30px",
-      alignItems: "start",
-    },
-    card: {
-      backgroundColor: "#fff",
-      borderRadius: "12px",
-      boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
-      padding: "32px",
-    },
-    statusAlert: {
-      padding: "16px",
-      borderRadius: "8px",
-      marginBottom: "24px",
-      fontSize: "14px",
-      fontWeight: "500",
-      border: "1px solid",
-    },
-    successAlert: {
-      backgroundColor: "#ecfdf5",
-      borderColor: "#86efac",
-      color: "#166534",
-    },
-    errorAlert: {
-      backgroundColor: "#fef2f2",
-      borderColor: "#fca5a5",
-      color: "#991b1b",
-    },
-    section: {
-      marginBottom: "32px",
-    },
-    sectionTitle: {
-      fontSize: "14px",
-      fontWeight: "600",
-      color: "#1a1a1a",
-      marginBottom: "16px",
-      textTransform: "uppercase",
-      letterSpacing: "0.5px",
-    },
-    formGroup: {
-      marginBottom: "20px",
-    },
-    label: {
-      fontSize: "14px",
-      fontWeight: "500",
-      color: "#333",
-      marginBottom: "8px",
-      display: "block",
-    },
-    required: {
-      color: "#e74c3c",
-    },
-    input: {
-      width: "100%",
-      padding: "12px 14px",
-      fontSize: "14px",
-      border: "1px solid #e0dcd9",
-      borderRadius: "8px",
-      fontFamily: "inherit",
-      transition: "all 0.2s ease",
-      boxSizing: "border-box",
-    },
-    inputFocus: {
-      borderColor: "#d4a574",
-      outline: "none",
-      boxShadow: "0 0 0 3px rgba(212, 165, 116, 0.1)",
-    },
-    textarea: {
-      width: "100%",
-      padding: "12px 14px",
-      fontSize: "14px",
-      border: "1px solid #e0dcd9",
-      borderRadius: "8px",
-      fontFamily: "inherit",
-      resize: "vertical",
-      minHeight: "100px",
-      transition: "all 0.2s ease",
-      boxSizing: "border-box",
-    },
-    formRow: {
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-      gap: "16px",
-    },
-    button: {
-      padding: "12px 20px",
-      fontSize: "14px",
-      fontWeight: "600",
-      border: "none",
-      borderRadius: "8px",
-      cursor: "pointer",
-      transition: "all 0.2s ease",
-      fontFamily: "inherit",
-    },
-    primaryButton: {
-      backgroundColor: "#d4a574",
-      color: "#fff",
-    },
-    primaryButtonHover: {
-      backgroundColor: "#c4945f",
-      boxShadow: "0 4px 12px rgba(212, 165, 116, 0.3)",
-    },
-    secondaryButton: {
-      backgroundColor: "#f0ebe5",
-      color: "#333",
-      border: "1px solid #e0dcd9",
-    },
-    secondaryButtonHover: {
-      backgroundColor: "#e8e2d9",
-    },
-    smallButton: {
-      padding: "8px 12px",
-      fontSize: "13px",
-    },
-    dangerButton: {
-      backgroundColor: "#ef4444",
-      color: "#fff",
-    },
-    dangerButtonHover: {
-      backgroundColor: "#dc2626",
-    },
-    buttonGroup: {
-      display: "flex",
-      gap: "12px",
-      marginTop: "32px",
-    },
-    itemRow: {
-      display: "grid",
-      gridTemplateColumns: "1fr",
-      gap: "12px",
-      padding: "16px",
-      backgroundColor: "#fafaf8",
-      borderRadius: "8px",
-      marginBottom: "12px",
-      border: "1px solid #e0dcd9",
-    },
-    itemInputRow: {
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(100px, 1fr))",
-      gap: "12px",
-      alignItems: "center",
-    },
-    ingredientsList: {
-      display: "grid",
-      gap: "8px",
-    },
-    stepNumber: {
-      fontSize: "12px",
-      fontWeight: "600",
-      color: "#999",
-      marginBottom: "8px",
-      textTransform: "uppercase",
-    },
-    previewCard: {
-      position: "sticky",
-      top: "20px",
-    },
-    previewImage: {
-      width: "100%",
-      height: "200px",
-      objectFit: "cover",
-      borderRadius: "8px",
-      backgroundColor: "#f0ebe5",
-      marginBottom: "20px",
-    },
-    previewImagePlaceholder: {
-      width: "100%",
-      height: "200px",
-      backgroundColor: "#f0ebe5",
-      borderRadius: "8px",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      color: "#999",
-      marginBottom: "20px",
-      fontSize: "14px",
-    },
-    previewTitle: {
-      fontSize: "20px",
-      fontWeight: "700",
-      color: "#1a1a1a",
-      marginBottom: "12px",
-    },
-    badge: {
-      display: "inline-block",
-      backgroundColor: "#d4a574",
-      color: "#fff",
-      padding: "6px 12px",
-      borderRadius: "20px",
-      fontSize: "12px",
-      fontWeight: "600",
-      marginRight: "6px",
-      marginBottom: "12px",
-    },
-    previewMeta: {
-      display: "flex",
-      gap: "16px",
-      fontSize: "13px",
-      color: "#666",
-      marginTop: "16px",
-      paddingTop: "16px",
-      borderTop: "1px solid #e0dcd9",
-    },
-    previewList: {
-      fontSize: "13px",
-      lineHeight: "1.8",
-      color: "#333",
-    },
-    addButtonGroup: {
-      display: "flex",
-      justifyContent: "flex-end",
-      marginBottom: "16px",
-    },
-    removeButtonContainer: {
-      display: "flex",
-      gap: "8px",
-      alignItems: "center",
-    },
-    checkboxContainer: {
-      display: "flex",
-      alignItems: "center",
-      gap: "8px",
-      marginTop: "8px",
-    },
-    checkbox: {
-      width: "18px",
-      height: "18px",
-      cursor: "pointer",
-      accentColor: "#d4a574",
-    },
-    checkboxLabel: {
-      fontSize: "14px",
-      cursor: "pointer",
-      color: "#333",
-    },
-    formHelper: {
-      fontSize: "12px",
-      color: "#999",
-      marginTop: "6px",
-    },
-    spinnerContainer: {
-      display: "inline-flex",
-      alignItems: "center",
-      gap: "8px",
-    },
-    spinner: {
-      width: "16px",
-      height: "16px",
-      border: "2px solid rgba(255,255,255,0.3)",
-      borderTop: "2px solid #fff",
-      borderRadius: "50%",
-      animation: "spin 0.6s linear infinite",
-    },
-    categoryGrid: {
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
-      gap: "12px",
-      padding: "16px",
-      backgroundColor: "#fafaf8",
-      borderRadius: "8px",
-      border: "1px solid #e0dcd9",
-      maxHeight: "200px",
-      overflowY: "auto",
-    },
-    categoryCheckboxItem: {
-      display: "flex",
-      alignItems: "center",
-      gap: "8px",
-      padding: "8px",
-      backgroundColor: "#fff",
-      borderRadius: "6px",
-      border: "1px solid #e0dcd9",
-      cursor: "pointer",
-      transition: "all 0.2s ease",
-    },
-    categoryCheckboxItemSelected: {
-      backgroundColor: "#f0ebe5",
-      borderColor: "#d4a574",
-    },
-  };
+  const totalLibraryPages = Math.max(1, Math.ceil(libraryCount / 20));
 
   return (
-    <div style={styles.container}>
-      <style>{`
-        @keyframes spin {
-          to { transform: rotate(360deg); }
-        }
-        input:focus, textarea:focus, select:focus {
-          outline: none;
-          border-color: #d4a574;
-          box-shadow: 0 0 0 3px rgba(212, 165, 116, 0.1);
-        }
-      `}</style>
+    <div className="rcreate-page">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={handleFileUpload}
+      />
 
-      <div style={styles.header}>
-        <h1 style={styles.title}>Create Recipe</h1>
-        <p style={styles.subtitle}>
-          Share your culinary creation with the community
-        </p>
-      </div>
+      <div className="rcreate-container">
+        {/* Clean Header */}
+        <header className="rcreate-header">
+          <div className="rcreate-header-left">
+            <button
+              type="button"
+              className="rcreate-back-btn"
+              onClick={() => navigate("/recipe")}
+            >
+              <ArrowLeft size={15} />
+              Back
+            </button>
+            <h1 className="rcreate-title">Create Recipe</h1>
+          </div>
 
-      <div style={styles.wrapper}>
-        {/* Form Column */}
-        <div>
-          <div style={styles.card}>
-            {status && (
-              <div
-                style={{
-                  ...styles.statusAlert,
-                  ...(status.type === "success"
-                    ? styles.successAlert
-                    : styles.errorAlert),
-                }}
-              >
-                {status.text}
+          <div className="rcreate-header-actions">
+            <button
+              type="button"
+              className="rcreate-btn"
+              onClick={handleReset}
+              disabled={submitting}
+            >
+              <RotateCcw size={14} />
+              Reset
+            </button>
+            <button
+              type="button"
+              className="rcreate-btn rcreate-btn--primary"
+              onClick={handleSubmit}
+              disabled={submitting || uploadingImage}
+            >
+              {submitting ? "Saving..." : "Create Recipe"}
+            </button>
+          </div>
+        </header>
+
+        {/* Alert Banner */}
+        {banner && (
+          <div
+            role="alert"
+            className={`rcreate-alert ${
+              banner.type === "error"
+                ? "rcreate-alert--error"
+                : "rcreate-alert--success"
+            }`}
+          >
+            <span>{banner.text}</span>
+            <button
+              type="button"
+              style={{
+                background: "transparent",
+                border: "none",
+                color: "inherit",
+                cursor: "pointer",
+              }}
+              onClick={() => setBanner(null)}
+            >
+              <X size={16} />
+            </button>
+          </div>
+        )}
+
+        {/* 2-Column Workspace: Clean Form + Sticky Side Preview */}
+        <form onSubmit={handleSubmit} className="rcreate-workspace" noValidate>
+          <div className="rcreate-form">
+            {/* 1. Basic Details & Cover Image */}
+            <section className="rcreate-section">
+              <div className="rcreate-section-head">
+                <h2 className="rcreate-section-title">Basic Details</h2>
               </div>
-            )}
 
-            <form onSubmit={handleSubmit}>
-              {/* Basic Info */}
-              <div style={styles.section}>
-                <h3 style={styles.sectionTitle}>Recipe Details</h3>
+              <div>
+                <label htmlFor="rc-name" className="rcreate-label">
+                  Recipe Name
+                </label>
+                <input
+                  id="rc-name"
+                  type="text"
+                  name="name"
+                  className="rcreate-input"
+                  placeholder="Enter recipe name"
+                  value={form.name}
+                  onChange={handleChange}
+                />
+              </div>
 
-                <div style={styles.formGroup}>
-                  <label style={styles.label}>
-                    Recipe Name
-                    <span style={styles.required}>*</span>
+              <div className="rcreate-row-3">
+                <div>
+                  <label htmlFor="rc-time-taken" className="rcreate-label">
+                    Prep Time (mins)
                   </label>
                   <input
-                    style={styles.input}
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g. Classic Beef Hamburger"
+                    id="rc-time-taken"
+                    type="number"
+                    min="1"
+                    name="time_taken"
+                    className="rcreate-input"
+                    placeholder="25"
+                    value={form.time_taken}
+                    onChange={handleChange}
                   />
-                </div>
-
-                <div style={styles.formGroup}>
-                  <label style={styles.label}>Description</label>
-                  <textarea
-                    style={styles.textarea}
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Share what makes this recipe special..."
-                  />
-                </div>
-
-                <div style={styles.formGroup}>
-                  <label style={styles.label}>
-                    Categories
-                    <span style={styles.required}>*</span>
-                  </label>
-                  <div style={styles.categoryGrid}>
-                    {categories.length === 0 ? (
-                      <div
-                        style={{
-                          gridColumn: "1 / -1",
-                          textAlign: "center",
-                          color: "#999",
-                        }}
-                      >
-                        Loading categories...
-                      </div>
-                    ) : (
-                      categories.map((cat) => (
-                        <div
-                          key={cat.id}
-                          style={{
-                            ...styles.categoryCheckboxItem,
-                            ...(selectedCategories.includes(cat.category_name)
-                              ? styles.categoryCheckboxItemSelected
-                              : {}),
-                          }}
-                          onClick={() => toggleCategory(cat.category_name)}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selectedCategories.includes(
-                              cat.category_name,
-                            )}
-                            onChange={() => toggleCategory(cat.category_name)}
-                            style={styles.checkbox}
-                            onClick={(e) => e.stopPropagation()}
-                          />
-                          <label style={{ ...styles.checkboxLabel, margin: 0 }}>
-                            {cat.category_name}
-                          </label>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                  <div style={styles.formHelper}>
-                    Select one or more categories ({selectedCategories.length}{" "}
-                    selected)
-                  </div>
-                </div>
-
-                {/* UPDATED: Upload to Cloudinary + URL fallback */}
-                <div style={styles.formGroup}>
-                  <label style={styles.label}>
-                    Recipe Image
-                    <span style={styles.required}>*</span>
-                  </label>
-
-                  <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    style={styles.input}
-                    disabled={uploadingImage}
-                    onChange={handleImageFileChange}
-                  />
-
-                  <div style={styles.formHelper}>
-                    {uploadingImage
-                      ? "Uploading image to Cloudinary..."
-                      : "Upload an image (recommended) or paste a URL below."}
-                  </div>
-
-                  <div style={{ marginTop: "10px" }}>
-                    <label
-                      style={{
-                        ...styles.label,
-                        fontSize: "12px",
-                        color: "#666",
-                      }}
-                    >
-                      Or paste Image URL (optional fallback)
-                    </label>
-                    <input
-                      style={styles.input}
-                      value={imageUrl}
-                      onChange={(e) => setImageUrl(e.target.value)}
-                      placeholder="https://..."
-                      disabled={uploadingImage}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              {/* Recipe Info */}
-              <div style={styles.section}>
-                <h3 style={styles.sectionTitle}>Recipe Information</h3>
-
-                <div style={styles.formRow}>
-                  <div style={styles.formGroup}>
-                    <label style={styles.label}>Total Time (min)</label>
-                    <input
-                      style={styles.input}
-                      type="number"
-                      min="0"
-                      value={totalTime}
-                      onChange={(e) => setTotalTime(e.target.value)}
-                    />
-                  </div>
-
-                  <div style={styles.formGroup}>
-                    <label style={styles.label}>Servings</label>
-                    <input
-                      style={styles.input}
-                      type="number"
-                      min="1"
-                      value={servings}
-                      onChange={(e) => setServings(e.target.value)}
-                    />
-                  </div>
-
-                  <div style={styles.formGroup}>
-                    <label style={styles.label}>Calories</label>
-                    <input
-                      style={styles.input}
-                      value={calories}
-                      onChange={(e) => setCalories(e.target.value)}
-                      placeholder="per serving"
-                    />
-                  </div>
-                </div>
-
-                <div style={styles.formRow}>
-                  <div style={styles.formGroup}>
-                    <label style={styles.label}>Country</label>
-                    <input
-                      style={styles.input}
-                      value={country}
-                      onChange={(e) => setCountry(e.target.value)}
-                      placeholder="Nigeria, France, etc."
-                    />
-                  </div>
-
-                  <div style={styles.formGroup}>
-                    <label style={styles.label}>Price</label>
-                    <input
-                      style={styles.input}
-                      value={price}
-                      onChange={(e) => setPrice(e.target.value)}
-                      placeholder="Optional"
-                    />
-                  </div>
-                </div>
-
-                <div style={styles.checkboxContainer}>
-                  <input
-                    style={styles.checkbox}
-                    type="checkbox"
-                    id="exclusiveCheck"
-                    checked={isExclusive}
-                    onChange={(e) => setIsExclusive(e.target.checked)}
-                  />
-                  <label style={styles.checkboxLabel} htmlFor="exclusiveCheck">
-                    Mark as exclusive recipe
-                  </label>
-                </div>
-              </div>
-
-              {/* Ingredients */}
-              <div style={styles.section}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    marginBottom: "16px",
-                  }}
-                >
-                  <h3 style={{ ...styles.sectionTitle, margin: 0 }}>
-                    Ingredients
-                  </h3>
-                  <button
-                    type="button"
-                    style={{
-                      ...styles.button,
-                      ...styles.smallButton,
-                      backgroundColor: "#d4a574",
-                      color: "#fff",
-                    }}
-                    onMouseEnter={(e) =>
-                      (e.target.style.backgroundColor = "#c4945f")
-                    }
-                    onMouseLeave={(e) =>
-                      (e.target.style.backgroundColor = "#d4a574")
-                    }
-                    onClick={addIngredient}
-                  >
-                    + Add
-                  </button>
-                </div>
-
-                <div style={styles.ingredientsList}>
-                  {ingredients.map((ing, idx) => (
-                    <div key={idx} style={styles.itemRow}>
-                      <div style={styles.itemInputRow}>
-                        <input
-                          style={styles.input}
-                          placeholder="Ingredient name"
-                          value={ing.name}
-                          onChange={(e) =>
-                            updateIngredient(idx, "name", e.target.value)
-                          }
-                        />
-                        <input
-                          style={styles.input}
-                          placeholder="Qty"
-                          value={ing.quantity}
-                          onChange={(e) =>
-                            updateIngredient(idx, "quantity", e.target.value)
-                          }
-                        />
-                        <input
-                          style={styles.input}
-                          placeholder="Unit"
-                          value={ing.unit}
-                          onChange={(e) =>
-                            updateIngredient(idx, "unit", e.target.value)
-                          }
-                        />
-                        <button
-                          type="button"
-                          style={{
-                            ...styles.button,
-                            ...styles.smallButton,
-                            ...styles.dangerButton,
-                          }}
-                          onMouseEnter={(e) =>
-                            (e.target.style.backgroundColor = "#dc2626")
-                          }
-                          onMouseLeave={(e) =>
-                            (e.target.style.backgroundColor = "#ef4444")
-                          }
-                          onClick={() => removeIngredient(idx)}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Steps */}
-              <div style={styles.section}>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    marginBottom: "16px",
-                  }}
-                >
-                  <h3 style={{ ...styles.sectionTitle, margin: 0 }}>Steps</h3>
-                  <button
-                    type="button"
-                    style={{
-                      ...styles.button,
-                      ...styles.smallButton,
-                      backgroundColor: "#d4a574",
-                      color: "#fff",
-                    }}
-                    onMouseEnter={(e) =>
-                      (e.target.style.backgroundColor = "#c4945f")
-                    }
-                    onMouseLeave={(e) =>
-                      (e.target.style.backgroundColor = "#d4a574")
-                    }
-                    onClick={addStep}
-                  >
-                    + Add
-                  </button>
                 </div>
 
                 <div>
-                  {steps.map((st, idx) => (
-                    <div key={idx} style={styles.itemRow}>
-                      <div style={styles.stepNumber}>Step {idx + 1}</div>
-                      <textarea
-                        style={styles.textarea}
-                        rows="2"
-                        placeholder="Describe this step..."
-                        value={st.description}
-                        onChange={(e) =>
-                          updateStep(idx, "description", e.target.value)
-                        }
-                      />
-                      <div style={styles.itemInputRow}>
-                        <input
-                          style={styles.input}
-                          type="number"
-                          min="0"
-                          placeholder="Duration (min)"
-                          value={st.duration}
-                          onChange={(e) =>
-                            updateStep(idx, "duration", e.target.value)
-                          }
-                        />
-                        <select
-                          style={styles.input}
-                          value={st.step_type}
-                          onChange={(e) =>
-                            updateStep(idx, "step_type", e.target.value)
-                          }
-                        >
-                          <option value="prep">Prep</option>
-                          <option value="cook">Cook</option>
-                          <option value="finish">Finish</option>
-                        </select>
-                        <button
-                          type="button"
-                          style={{
-                            ...styles.button,
-                            ...styles.smallButton,
-                            ...styles.dangerButton,
-                          }}
-                          onMouseEnter={(e) =>
-                            (e.target.style.backgroundColor = "#dc2626")
-                          }
-                          onMouseLeave={(e) =>
-                            (e.target.style.backgroundColor = "#ef4444")
-                          }
-                          onClick={() => removeStep(idx)}
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                  <label htmlFor="rc-total-time" className="rcreate-label">
+                    Total Time (mins)
+                  </label>
+                  <input
+                    id="rc-total-time"
+                    type="number"
+                    min="1"
+                    name="total_time"
+                    className="rcreate-input"
+                    placeholder="45"
+                    value={form.total_time}
+                    onChange={handleChange}
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="rc-servings" className="rcreate-label">
+                    Servings
+                  </label>
+                  <input
+                    id="rc-servings"
+                    type="number"
+                    min="1"
+                    name="servings"
+                    className="rcreate-input"
+                    placeholder="4"
+                    value={form.servings}
+                    onChange={handleChange}
+                  />
                 </div>
               </div>
 
-              {/* Form Actions */}
-              <div style={styles.buttonGroup}>
-                <button
-                  type="submit"
-                  style={{
-                    ...styles.button,
-                    ...styles.primaryButton,
-                  }}
-                  onMouseEnter={(e) =>
-                    (e.target.style.backgroundColor = "#c4945f")
-                  }
-                  onMouseLeave={(e) =>
-                    (e.target.style.backgroundColor = "#d4a574")
-                  }
-                  disabled={submitting || uploadingImage}
+              {/* Cover Image */}
+              <div className="rcreate-cover-row">
+                <div
+                  className="rcreate-cover-thumb"
+                  onClick={() => fileInputRef.current?.click()}
+                  title="Click to upload cover image"
                 >
-                  {submitting ? (
-                    <span style={styles.spinnerContainer}>
-                      <div style={styles.spinner} />
-                      Creating...
-                    </span>
-                  ) : uploadingImage ? (
-                    "Uploading image..."
+                  {form.image_url ? (
+                    <img src={form.image_url} alt="Cover" />
                   ) : (
-                    "Create Recipe"
+                    <ImageIcon size={22} />
                   )}
-                </button>
+                </div>
 
+                <div className="rcreate-cover-controls">
+                  <label htmlFor="rc-image-url" className="rcreate-label">
+                    Cover Image
+                  </label>
+                  <input
+                    id="rc-image-url"
+                    type="url"
+                    name="image_url"
+                    className="rcreate-input"
+                    placeholder="Paste image URL or upload below"
+                    value={form.image_url}
+                    onChange={handleChange}
+                  />
+                  <div className="rcreate-cover-actions">
+                    <button
+                      type="button"
+                      className="rcreate-btn rcreate-btn--soft rcreate-btn--sm"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploadingImage}
+                    >
+                      <Upload size={13} />
+                      {uploadingImage ? "Uploading..." : "Upload Image"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="rcreate-btn rcreate-btn--sm"
+                      onClick={openImageLibrary}
+                    >
+                      <ImageIcon size={13} />
+                      Choose from Library
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <label htmlFor="rc-is-special" className="rcreate-special-row">
+                <input
+                  id="rc-is-special"
+                  type="checkbox"
+                  name="is_special"
+                  checked={form.is_special}
+                  onChange={handleChange}
+                  style={{ width: 16, height: 16, accentColor: "#129575" }}
+                />
+                <span>Mark as Special / Featured Recipe</span>
+              </label>
+            </section>
+
+            {/* 2. Categories */}
+            <section className="rcreate-section">
+              <div className="rcreate-section-head">
+                <h2 className="rcreate-section-title">Categories</h2>
+                {form.categories_id.length > 0 && (
+                  <span className="rcreate-badge">
+                    {form.categories_id.length} selected
+                  </span>
+                )}
+              </div>
+
+              {categoriesLoading ? (
+                <div style={{ fontSize: 13, color: "#94a3b8" }}>
+                  Loading categories...
+                </div>
+              ) : categories.length === 0 ? (
+                <div style={{ fontSize: 13, color: "#94a3b8" }}>
+                  No categories available.
+                </div>
+              ) : (
+                <div className="rcreate-cat-grid">
+                  {categories.map((cat) => {
+                    const isSelected = form.categories_id.includes(
+                      Number(cat.id)
+                    );
+                    return (
+                      <button
+                        key={cat.id}
+                        type="button"
+                        className={`rcreate-cat-pill${
+                          isSelected ? " rcreate-cat-pill--active" : ""
+                        }`}
+                        onClick={() => toggleCategory(cat.id)}
+                      >
+                        {isSelected && <Check size={13} />}
+                        <span>{cat.displayName}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            {/* 3. Ingredients */}
+            <section className="rcreate-section">
+              <div className="rcreate-section-head">
+                <h2 className="rcreate-section-title">Ingredients</h2>
                 <button
                   type="button"
-                  style={{
-                    ...styles.button,
-                    ...styles.secondaryButton,
-                  }}
-                  onMouseEnter={(e) =>
-                    (e.target.style.backgroundColor = "#e8e2d9")
-                  }
-                  onMouseLeave={(e) =>
-                    (e.target.style.backgroundColor = "#f0ebe5")
-                  }
-                  disabled={submitting || uploadingImage}
-                  onClick={() => {
-                    setName("");
-                    setSelectedCategories([]);
-                    setImageUrl("");
-                    setDescription("");
-                    setTotalTime(30);
-                    setServings(2);
-                    setIsExclusive(false);
-                    setCalories("");
-                    setCountry("");
-                    setPrice("");
-                    setIngredients([emptyIngredient()]);
-                    setSteps([emptyStep(1)]);
-                    setStatus(null);
-                    if (fileInputRef.current) fileInputRef.current.value = "";
-                  }}
+                  className="rcreate-btn rcreate-btn--soft rcreate-btn--sm"
+                  onClick={addIngredient}
                 >
-                  Reset
+                  <Plus size={14} />
+                  Add Ingredient
                 </button>
               </div>
-            </form>
+
+              <div className="rcreate-ing-cols">
+                <span />
+                <span>Name</span>
+                <span>Quantity</span>
+                <span>Unit</span>
+                <span />
+              </div>
+
+              {form.ingredients.map((ing, index) => (
+                <div key={index} className="rcreate-ing-item">
+                  <span className="rcreate-row-num">{index + 1}.</span>
+
+                  <input
+                    type="text"
+                    className="rcreate-input"
+                    placeholder="Ingredient name"
+                    value={ing.name}
+                    onChange={(e) =>
+                      handleIngredientChange(index, "name", e.target.value)
+                    }
+                  />
+
+                  <input
+                    type="number"
+                    step="any"
+                    min="0"
+                    className="rcreate-input"
+                    placeholder="0"
+                    value={ing.quantity}
+                    onChange={(e) =>
+                      handleIngredientChange(index, "quantity", e.target.value)
+                    }
+                  />
+
+                  <input
+                    type="text"
+                    list="rcreate-unit-list"
+                    className="rcreate-input"
+                    placeholder="g, cup, tbsp"
+                    value={ing.unit}
+                    onChange={(e) =>
+                      handleIngredientChange(index, "unit", e.target.value)
+                    }
+                  />
+
+                  <button
+                    type="button"
+                    className="rcreate-btn--icon-remove"
+                    title="Remove ingredient"
+                    onClick={() => removeIngredient(index)}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+
+              <datalist id="rcreate-unit-list">
+                {COMMON_UNITS.map((u) => (
+                  <option key={u} value={u} />
+                ))}
+              </datalist>
+            </section>
+
+            {/* 4. Cooking Steps */}
+            <section className="rcreate-section">
+              <div className="rcreate-section-head">
+                <h2 className="rcreate-section-title">Cooking Steps</h2>
+                <button
+                  type="button"
+                  className="rcreate-btn rcreate-btn--soft rcreate-btn--sm"
+                  onClick={addStep}
+                >
+                  <Plus size={14} />
+                  Add Step
+                </button>
+              </div>
+
+              {form.steps.map((step, index) => (
+                <div key={index} className="rcreate-step-item">
+                  <span className="rcreate-step-num">{index + 1}</span>
+
+                  <textarea
+                    className="rcreate-textarea"
+                    placeholder={`Step ${index + 1} instructions`}
+                    value={step.instruction}
+                    onChange={(e) =>
+                      handleStepChange(index, "instruction", e.target.value)
+                    }
+                  />
+
+                  <select
+                    className="rcreate-select"
+                    value={step.process_type}
+                    onChange={(e) =>
+                      handleStepChange(index, "process_type", e.target.value)
+                    }
+                  >
+                    <option value="prep">Prep</option>
+                    <option value="cook">Cook</option>
+                    <option value="finish">Finish</option>
+                  </select>
+
+                  <button
+                    type="button"
+                    className="rcreate-btn--icon-remove"
+                    style={{ marginTop: 4 }}
+                    title="Remove step"
+                    onClick={() => removeStep(index)}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+            </section>
+
+            {/* 5. Nutrition (Per Serving) */}
+            <section className="rcreate-section">
+              <div className="rcreate-section-head">
+                <h2 className="rcreate-section-title">Nutrition (Per Serving)</h2>
+              </div>
+
+              <div className="rcreate-row-4">
+                {[
+                  { key: "calories", label: "Calories (kcal)" },
+                  { key: "protein", label: "Protein (g)" },
+                  { key: "carbs", label: "Carbs (g)" },
+                  { key: "fat", label: "Fat (g)" },
+                ].map((macro) => (
+                  <div key={macro.key}>
+                    <label
+                      htmlFor={`rc-macro-${macro.key}`}
+                      className="rcreate-label"
+                    >
+                      {macro.label}
+                    </label>
+                    <input
+                      id={`rc-macro-${macro.key}`}
+                      type="number"
+                      step="any"
+                      min="0"
+                      name={macro.key}
+                      className="rcreate-input"
+                      placeholder="0"
+                      value={form.nutrition[macro.key]}
+                      onChange={handleNutritionChange}
+                    />
+                  </div>
+                ))}
+              </div>
+            </section>
           </div>
-        </div>
 
-        {/* Preview Column */}
-        <div style={styles.previewCard}>
-          <div style={styles.card}>
-            <h3 style={styles.sectionTitle}>Preview</h3>
+          {/* RIGHT SIDE: Sticky Live Recipe Preview */}
+          <aside className="rcreate-side">
+            <div className="rcreate-preview-card">
+              <div className="rcreate-preview-head">
+                <span style={{ fontSize: 13.5, fontWeight: 700 }}>
+                  Recipe Preview
+                </span>
+                <span style={{ fontSize: 11.5, color: "#94a3b8" }}>
+                  Live Card
+                </span>
+              </div>
 
-            {imageUrl ? (
-              <img
-                src={imageUrl || "/placeholder.svg"}
-                alt="recipe preview"
-                style={styles.previewImage}
-                onError={(e) => {
-                  e.target.src =
-                    "https://via.placeholder.com/400x300?text=Invalid+Image";
+              <div className="rcreate-preview-media">
+                {form.image_url ? (
+                  <img src={form.image_url} alt="Recipe preview" />
+                ) : (
+                  <span>Cover image preview</span>
+                )}
+                {form.is_special && (
+                  <span className="rcreate-preview-special">Featured</span>
+                )}
+              </div>
+
+              <div className="rcreate-preview-body">
+                <h3 className="rcreate-preview-title">
+                  {form.name.trim() || "Untitled Recipe"}
+                </h3>
+
+                <div className="rcreate-preview-meta">
+                  <span>{form.total_time || form.time_taken || 0} mins</span>
+                  <span>•</span>
+                  <span>{form.servings || 1} servings</span>
+                  <span>•</span>
+                  <span>{form.nutrition.calories || 0} kcal</span>
+                </div>
+
+                {selectedCategoryNames.length > 0 && (
+                  <div className="rcreate-preview-cats">
+                    {selectedCategoryNames.map((name) => (
+                      <span key={name} className="rcreate-preview-cat">
+                        {name}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
+                <div className="rcreate-preview-stats">
+                  <div>
+                    <div className="rcreate-preview-stat-val">
+                      {validIngredients.length}
+                    </div>
+                    <div className="rcreate-preview-stat-lbl">Ingredients</div>
+                  </div>
+                  <div>
+                    <div className="rcreate-preview-stat-val">
+                      {validSteps.length}
+                    </div>
+                    <div className="rcreate-preview-stat-lbl">Steps</div>
+                  </div>
+                  <div>
+                    <div className="rcreate-preview-stat-val">
+                      {form.nutrition.protein || 0}g
+                    </div>
+                    <div className="rcreate-preview-stat-lbl">Protein</div>
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  className="rcreate-btn rcreate-btn--primary"
+                  style={{ width: "100%", marginTop: 18, padding: "11px 16px" }}
+                  disabled={submitting || uploadingImage}
+                >
+                  {submitting ? "Saving..." : "Create Recipe"}
+                </button>
+              </div>
+            </div>
+          </aside>
+        </form>
+      </div>
+
+      {/* IMAGE LIBRARY PICKER MODAL (Deduplicated, Paginated & Tag-Searchable) */}
+      {libraryOpen && (
+        <div
+          className="rcreate-modal-backdrop"
+          onClick={() => setLibraryOpen(false)}
+        >
+          <div className="rcreate-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="rcreate-modal-head">
+              <div>
+                <h3 className="rcreate-section-title">
+                  Choose from Image Library
+                </h3>
+                <span style={{ fontSize: 12, color: "#64748b" }}>
+                  Click any image to use it as your recipe cover
+                </span>
+              </div>
+              <button
+                type="button"
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "#64748b",
+                }}
+                onClick={() => setLibraryOpen(false)}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="rcreate-modal-search">
+              <input
+                type="text"
+                className="rcreate-input"
+                placeholder="Search by food name, tag, or ID..."
+                value={librarySearch}
+                onChange={(e) => {
+                  setLibrarySearch(e.target.value);
+                  setLibraryPage(1);
                 }}
               />
-            ) : (
-              <div style={styles.previewImagePlaceholder}>
-                {uploadingImage ? "Uploading..." : "No image yet"}
-              </div>
-            )}
-
-            <div style={styles.previewTitle}>{name || "Recipe name"}</div>
-
-            <div>
-              {selectedCategories.length > 0 ? (
-                selectedCategories.map((c, i) => (
-                  <span key={i} style={styles.badge}>
-                    {c}
-                  </span>
-                ))
-              ) : (
-                <span
-                  style={{
-                    ...styles.badge,
-                    backgroundColor: "#e0dcd9",
-                    color: "#999",
+              {librarySearch && (
+                <button
+                  type="button"
+                  className="rcreate-btn rcreate-btn--sm"
+                  onClick={() => {
+                    setLibrarySearch("");
+                    setLibraryPage(1);
                   }}
                 >
-                  No categories
-                </span>
+                  Clear
+                </button>
               )}
             </div>
 
-            <p style={{ fontSize: "13px", color: "#666", lineHeight: "1.6" }}>
-              {description || "Your description will appear here."}
-            </p>
+            {libraryLoading ? (
+              <div
+                style={{
+                  padding: "48px 18px",
+                  textAlign: "center",
+                  color: "#94a3b8",
+                  fontSize: 13,
+                  flex: 1,
+                }}
+              >
+                Loading images...
+              </div>
+            ) : libraryImages.length === 0 ? (
+              <div
+                style={{
+                  padding: "48px 18px",
+                  textAlign: "center",
+                  color: "#94a3b8",
+                  fontSize: 13,
+                  flex: 1,
+                }}
+              >
+                No matching images found.
+              </div>
+            ) : (
+              <div className="rcreate-lib-grid">
+                {libraryImages.map((img) => {
+                  const isSelected = form.image_url === img.url;
+                  const tagText =
+                    Array.isArray(img.tags) && img.tags.length > 0
+                      ? img.tags.slice(0, 3).join(", ")
+                      : "";
+                  return (
+                    <button
+                      key={img.id}
+                      type="button"
+                      className={`rcreate-lib-item${
+                        isSelected ? " rcreate-lib-item--selected" : ""
+                      }`}
+                      onClick={() => {
+                        setForm((prev) => ({ ...prev, image_url: img.url }));
+                        setLibraryOpen(false);
+                      }}
+                    >
+                      <img
+                        src={img.thumb || img.url}
+                        alt={img.name}
+                        loading="lazy"
+                      />
+                      <div className="rcreate-lib-meta">
+                        <div className="rcreate-lib-title">{img.name}</div>
+                        {tagText && (
+                          <div className="rcreate-lib-tags">{tagText}</div>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
-            <div style={styles.previewMeta}>
-              <div>⏱ {totalTime}m</div>
-              <div>🍽 {servings} servings</div>
-              <div>{isExclusive ? "🔒 Exclusive" : "📖 Public"}</div>
-            </div>
-
-            <hr
-              style={{
-                border: "none",
-                borderTop: "1px solid #e0dcd9",
-                margin: "16px 0",
-              }}
-            />
-
-            <div style={styles.section}>
-              <h4 style={{ ...styles.sectionTitle, fontSize: "12px" }}>
-                Ingredients
-              </h4>
-              <ul style={{ ...styles.previewList, paddingLeft: "20px" }}>
-                {ingredients.filter((i) => i.name).length ? (
-                  ingredients
-                    .filter((i) => i.name)
-                    .map((ing, idx) => (
-                      <li key={idx}>
-                        {ing.quantity ? `${ing.quantity} ${ing.unit} ` : ""}
-                        <strong>{ing.name}</strong>
-                      </li>
-                    ))
-                ) : (
-                  <li style={{ color: "#999" }}>No ingredients yet</li>
-                )}
-              </ul>
-            </div>
-
-            <div>
-              <h4 style={{ ...styles.sectionTitle, fontSize: "12px" }}>
-                Steps
-              </h4>
-              <ol style={{ ...styles.previewList, paddingLeft: "20px" }}>
-                {steps.filter((s) => s.description).length ? (
-                  steps
-                    .filter((s) => s.description)
-                    .map((s, idx) => (
-                      <li key={idx} style={{ marginBottom: "8px" }}>
-                        <div>{s.description}</div>
-                        <div style={{ fontSize: "11px", color: "#999" }}>
-                          ({s.step_type} • {s.duration}m)
-                        </div>
-                      </li>
-                    ))
-                ) : (
-                  <li style={{ color: "#999" }}>No steps yet</li>
-                )}
-              </ol>
+            <div className="rcreate-modal-foot">
+              <span>
+                Page {libraryPage} of {totalLibraryPages}
+                {libraryCount > 0 ? ` (${libraryCount} images)` : ""}
+              </span>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  type="button"
+                  className="rcreate-btn rcreate-btn--sm"
+                  disabled={libraryPage <= 1 || libraryLoading}
+                  onClick={() => setLibraryPage((p) => Math.max(1, p - 1))}
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  className="rcreate-btn rcreate-btn--sm"
+                  disabled={libraryPage >= totalLibraryPages || libraryLoading}
+                  onClick={() =>
+                    setLibraryPage((p) => Math.min(totalLibraryPages, p + 1))
+                  }
+                >
+                  Next
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

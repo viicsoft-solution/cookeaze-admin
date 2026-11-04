@@ -49,10 +49,14 @@ h1.display-5 { letter-spacing: -0.02em; }
 .app-layout {
   display: flex;
   min-height: 100vh;
+  max-width: 100vw;
+  overflow-x: hidden;
 }
 
 .app-content {
-  flex: 1;
+  flex: 1 1 0%;
+  min-width: 0;
+  max-width: 100%;
   margin-left: var(--sidebar-width);
   background: var(--bg-secondary);
   min-height: 100vh;
@@ -190,6 +194,52 @@ h1.display-5 { letter-spacing: -0.02em; }
 /* ---------- Spinner ---------- */
 .spinner-border.text-primary {
   color: var(--primary) !important;
+}
+
+/* ---------- Global Shimmer Skeleton Utilities ---------- */
+.shimmer {
+  position: relative;
+  overflow: hidden;
+  background-color: #e2e8f0;
+  border-radius: 6px;
+}
+
+.shimmer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.65) 50%,
+    rgba(255, 255, 255, 0) 100%
+  );
+  animation: cookeazeShimmer 1.4s infinite;
+}
+
+@keyframes cookeazeShimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+.shimmer-line {
+  height: 14px;
+  border-radius: 6px;
+}
+
+.shimmer-title {
+  height: 28px;
+  border-radius: 8px;
+}
+
+.shimmer-circle {
+  border-radius: 50%;
+}
+
+.shimmer-box {
+  border-radius: 8px;
 }
 
 /* ---------- Background Utilities ---------- */

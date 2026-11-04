@@ -1,0 +1,812 @@
+/* src/pages/Notifications.css — Ultra-Clean, Uncluttered Push Notification Studio */
+
+.ntf-page {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 28px 32px 64px;
+  color: #0f172a;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, sans-serif;
+}
+
+/* ── Page Header ── */
+.ntf-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.ntf-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: -0.02em;
+  margin: 0 0 4px;
+  line-height: 1.25;
+}
+
+.ntf-subtitle {
+  font-size: 0.84rem;
+  color: #64748b;
+  margin: 0;
+}
+
+/* ── Buttons ── */
+.ntf-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  background: #ffffff;
+  color: #334155;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.ntf-btn:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+
+.ntf-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.ntf-btn-primary {
+  background: #0f172a;
+  color: #ffffff;
+  border-color: #0f172a;
+}
+
+.ntf-btn-primary:hover:not(:disabled) {
+  background: #1e293b;
+  border-color: #1e293b;
+  color: #ffffff;
+}
+
+.ntf-btn-sm {
+  height: 28px;
+  padding: 0 10px;
+  font-size: 0.74rem;
+  border-radius: 5px;
+}
+
+.ntf-btn-lg {
+  height: 42px;
+  padding: 0 20px;
+  font-size: 0.85rem;
+}
+
+/* ── Toast Banner ── */
+.ntf-toast {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 16px;
+  border-radius: 6px;
+  font-size: 0.83rem;
+  font-weight: 500;
+  margin-bottom: 20px;
+}
+
+.ntf-toast-success {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+
+.ntf-toast-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+.ntf-toast-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ntf-toast-close {
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 2px;
+  display: inline-flex;
+}
+
+/* ── Flat Professional Badges (Reduced Radius 4px) ── */
+.ntf-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 0.69rem;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.ntf-badge-emerald {
+  background: #f0fdf4;
+  color: #15803d;
+  border: 1px solid #bbf7d0;
+}
+
+.ntf-badge-amber {
+  background: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
+/* ── 2-Column Studio Workspace ── */
+.ntf-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 390px;
+  gap: 28px;
+  align-items: start;
+}
+
+.ntf-side {
+  position: sticky;
+  top: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ── Surface Cards ── */
+.ntf-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.ntf-card-header {
+  padding: 16px 24px;
+  border-bottom: 1px solid #f1f5f9;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ntf-card-title {
+  font-size: 0.94rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 0;
+}
+
+.ntf-card-body {
+  padding: 24px;
+}
+
+/* ── Clean Segmented Channel Switcher ── */
+.ntf-channel-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 4px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  margin-bottom: 24px;
+}
+
+.ntf-channel-tab {
+  height: 36px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: #475569;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+.ntf-channel-tab:hover {
+  color: #0f172a;
+}
+
+.ntf-channel-tab.active {
+  background: #0f172a;
+  color: #ffffff;
+}
+
+/* ── Form Stack with Generous Breathing Room ── */
+.ntf-form-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.ntf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.ntf-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ntf-label {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.ntf-req {
+  color: #dc2626;
+  margin-left: 2px;
+}
+
+.ntf-counter {
+  font-size: 0.73rem;
+  font-weight: 500;
+  color: #94a3b8;
+  font-variant-numeric: tabular-nums;
+}
+
+.ntf-counter.over {
+  color: #d97706;
+  font-weight: 600;
+}
+
+/* Segmented 3-Option Selector (Meal Window) */
+.ntf-segmented-3 {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ntf-segment-btn {
+  height: 38px;
+  padding: 0 12px;
+  border-radius: 6px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #334155;
+  font-size: 0.81rem;
+  font-weight: 600;
+  text-transform: capitalize;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.ntf-segment-btn:hover {
+  background: #f8fafc;
+  border-color: #94a3b8;
+}
+
+.ntf-segment-btn.active {
+  background: #f0fdf4;
+  border-color: #16a34a;
+  color: #15803d;
+  font-weight: 700;
+}
+
+/* Quick Template Chips */
+.ntf-template-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ntf-template-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #64748b;
+}
+
+.ntf-template-chip {
+  padding: 5px 11px;
+  border-radius: 5px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.ntf-template-chip:hover {
+  border-color: #94a3b8;
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+/* Featured Recipe Selection Card */
+.ntf-recipe-selector {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 13px 16px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+}
+
+.ntf-recipe-selector.selected {
+  background: #f0fdf4;
+  border-color: #86efac;
+}
+
+.ntf-recipe-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.ntf-recipe-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 6px;
+  object-fit: cover;
+  background: #e2e8f0;
+  border: 1px solid #cbd5e1;
+  flex-shrink: 0;
+}
+
+.ntf-recipe-title {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #0f172a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ntf-recipe-sub {
+  font-size: 0.76rem;
+  color: #64748b;
+  margin-top: 2px;
+}
+
+/* Inputs & Textareas */
+.ntf-input,
+.ntf-textarea {
+  width: 100%;
+  padding: 9px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 0.84rem;
+  color: #0f172a;
+  background: #ffffff;
+  box-sizing: border-box;
+  font-family: inherit;
+  transition: border-color 0.15s ease;
+}
+
+.ntf-input {
+  height: 38px;
+  padding: 0 12px;
+}
+
+.ntf-input::placeholder,
+.ntf-textarea::placeholder {
+  color: #94a3b8;
+  opacity: 0.42;
+}
+
+.ntf-input:focus,
+.ntf-textarea:focus {
+  outline: none;
+  border-color: #0f172a;
+}
+
+.ntf-textarea {
+  min-height: 84px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.ntf-textarea-mono {
+  font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+  font-size: 0.78rem;
+  min-height: 64px;
+  background: #f8fafc;
+}
+
+/* Collapsible Advanced Options Toggle */
+.ntf-advanced-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.76rem;
+  font-weight: 600;
+  color: #64748b;
+  cursor: pointer;
+  align-self: flex-start;
+}
+
+.ntf-advanced-toggle:hover {
+  color: #0f172a;
+}
+
+/* Composer Action Bar */
+.ntf-composer-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  padding-top: 20px;
+  margin-top: 4px;
+  border-top: 1px solid #f1f5f9;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+   LIVE MOBILE PREVIEW (Right Column Hero — Clean & Focused)
+   ══════════════════════════════════════════════════════════════════ */
+.ntf-preview-os-toggle {
+  display: inline-flex;
+  align-items: center;
+  background: #f1f5f9;
+  padding: 2px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  flex-shrink: 0;
+}
+
+.ntf-os-btn {
+  border: none;
+  background: transparent;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ntf-os-btn.active {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.ntf-phone-frame {
+  background: #0f172a;
+  border-radius: 14px;
+  padding: 16px 16px 20px;
+  color: #ffffff;
+}
+
+.ntf-phone-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.69rem;
+  font-weight: 600;
+  color: #94a3b8;
+  padding: 0 2px 12px;
+}
+
+.ntf-phone-clock-wrap {
+  text-align: center;
+  padding: 4px 0 16px;
+}
+
+.ntf-phone-clock-time {
+  font-size: 1.9rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: #f8fafc;
+  line-height: 1.05;
+}
+
+.ntf-phone-clock-date {
+  font-size: 0.73rem;
+  color: #94a3b8;
+  margin-top: 3px;
+}
+
+.ntf-notif-card {
+  background: #ffffff;
+  color: #0f172a;
+  border-radius: 10px;
+  padding: 13px 14px;
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+}
+
+.ntf-notif-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.ntf-notif-app {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #475569;
+  letter-spacing: 0.03em;
+}
+
+.ntf-notif-app-icon {
+  width: 17px;
+  height: 17px;
+  border-radius: 4px;
+  background: #16a34a;
+  color: #ffffff;
+  font-size: 0.62rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ntf-notif-time {
+  font-size: 0.68rem;
+  color: #94a3b8;
+}
+
+.ntf-notif-main {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ntf-notif-copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.ntf-notif-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.32;
+  margin-bottom: 3px;
+  word-break: break-word;
+}
+
+.ntf-notif-body {
+  font-size: 0.78rem;
+  color: #475569;
+  line-height: 1.44;
+  word-break: break-word;
+}
+
+.ntf-notif-mini-thumb {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid #e2e8f0;
+}
+
+.ntf-notif-rich-banner {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+  border-radius: 6px;
+  margin-top: 10px;
+  display: block;
+  border: 1px solid #e2e8f0;
+}
+
+/* ── Recent Dispatches List ── */
+.ntf-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ntf-history-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+}
+
+.ntf-history-item:hover {
+  background: #f8fafc;
+}
+
+.ntf-history-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #0f172a;
+  margin: 5px 0 2px;
+}
+
+.ntf-history-body {
+  font-size: 0.75rem;
+  color: #64748b;
+  line-height: 1.4;
+  margin-bottom: 5px;
+}
+
+.ntf-history-meta {
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+
+/* ── Delivery Report Stats Grid ── */
+.ntf-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.ntf-stat-box {
+  padding: 12px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+}
+
+.ntf-stat-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: #64748b;
+}
+
+.ntf-stat-val {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: #0f172a;
+  margin-top: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Recipe Picker Modal ── */
+.ntf-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.48);
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.ntf-modal {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  width: 100%;
+  max-width: 720px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 20px 38px rgba(15, 23, 42, 0.16);
+}
+
+.ntf-modal-header {
+  padding: 15px 22px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+}
+
+.ntf-modal-search {
+  padding: 12px 22px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  gap: 8px;
+  background: #f8fafc;
+  flex-shrink: 0;
+}
+
+.ntf-modal-body {
+  padding: 18px 22px;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.ntf-recipe-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ntf-recipe-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.12s ease;
+}
+
+.ntf-recipe-card:hover {
+  border-color: #94a3b8;
+  background: #f8fafc;
+}
+
+.ntf-recipe-card.selected {
+  border-color: #16a34a;
+  background: #f0fdf4;
+}
+
+.ntf-modal-footer {
+  padding: 12px 22px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: #64748b;
+  flex-shrink: 0;
+}
+
+/* ── Responsive Breakpoints ── */
+@media (max-width: 1024px) {
+  .ntf-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .ntf-side {
+    position: static;
+  }
+}
+
+@media (max-width: 768px) {
+  .ntf-page {
+    padding: 18px 16px 44px;
+  }
+
+  .ntf-channel-tabs,
+  .ntf-segmented-3,
+  .ntf-recipe-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ntf-recipe-selector {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

@@ -6,7 +6,6 @@ import {
   Routes,
   Route,
   Navigate,
-  useLocation,
 } from "react-router-dom";
 
 import { AuthProvider, useAuth } from "./contexts/AuthProvider";
@@ -20,11 +19,6 @@ import RecipeList from "./components/RecipeList";
 import RecipeThemesDashboard from "./components/Recipe_themes_dashboard";
 import RecipeCreate from "./components/RecipeCreate";
 import RecipeDetail from "./components/RecipeDetail";
-
-// adverts pages
-import AdvertsList from "./pages/AdvertsList";
-import AdvertDetail from "./pages/AdvertDetail";
-import AdvertForm from "./pages/AdvertForm";
 import NotificationAdmin from "./pages/Notifications";
 
 // admin & categories
@@ -47,6 +41,12 @@ import ImageLibrary from "./pages/Imagelibrary";
 import CreatorsPage from "./pages/CreatorsPage";
 import CreatorDetailPage from "./pages/CreatorDetailPage";
 import AppFeedbackPage from "./pages/AppFeedbackPage";
+import WarehousesPage from "./pages/WarehousesPage";
+import WarehouseDetailPage from "./pages/WarehouseDetailPage";
+import FinancePage from "./pages/FinancePage";
+import CampaignsPage from "./pages/CampaignsPage";
+import MarketCatalogPage from "./pages/MarketCatalogPage";
+import CouponsPage from "./pages/CouponsPage";
 
 // small helper for "/" route to preserve your existing logic
 function LoginOrRedirect() {
@@ -55,9 +55,7 @@ function LoginOrRedirect() {
 }
 
 function AppRoutes() {
-  const location = useLocation();
   const { token } = useAuth();
-  const isImageLib = location.pathname === "/imagelib";
 
   return (
     <>
@@ -65,13 +63,7 @@ function AppRoutes() {
 
       <div className={token ? "app-layout" : ""}>
         {/* Push content area beside the sidebar when authenticated */}
-        <main
-          className={
-            token
-              ? `app-content${isImageLib ? " app-content--fullwidth" : ""}`
-              : ""
-          }
-        >
+        <main className={token ? "app-content" : ""}>
           <Routes>
             <Route path="/" element={<LoginOrRedirect />} />
 
@@ -146,23 +138,6 @@ function AppRoutes() {
               }
             />
 
-            {/* Adverts */}
-            <Route
-              path="/adverts"
-              element={
-                <PrivateRoute>
-                  <AdvertsList />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/adverts/create"
-              element={
-                <PrivateRoute>
-                  <AdvertForm mode="create" />
-                </PrivateRoute>
-              }
-            />
             <Route
               path="/users"
               element={
@@ -203,23 +178,6 @@ function AppRoutes() {
               element={
                 <PrivateRoute>
                   <AdminChangeRolePage />
-                </PrivateRoute>
-              }
-            />
-
-            <Route
-              path="/adverts/:id"
-              element={
-                <PrivateRoute>
-                  <AdvertDetail />
-                </PrivateRoute>
-              }
-            />
-            <Route
-              path="/adverts/:id/edit"
-              element={
-                <PrivateRoute>
-                  <AdvertForm mode="edit" />
                 </PrivateRoute>
               }
             />
@@ -300,6 +258,104 @@ function AppRoutes() {
               element={
                 <PrivateRoute>
                   <AppFeedbackPage />
+                </PrivateRoute>
+              }
+            />
+
+            {/* Warehouses */}
+            <Route
+              path="/warehouses"
+              element={
+                <PrivateRoute>
+                  <WarehousesPage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/warehouses/:id"
+              element={
+                <PrivateRoute>
+                  <WarehouseDetailPage />
+                </PrivateRoute>
+              }
+            />
+
+            {/* Finance & Withdrawals + Order Disputes */}
+            <Route
+              path="/finance"
+              element={
+                <PrivateRoute>
+                  <FinancePage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/withdrawals"
+              element={
+                <PrivateRoute>
+                  <FinancePage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/disputes"
+              element={
+                <PrivateRoute>
+                  <FinancePage defaultTab="disputes" />
+                </PrivateRoute>
+              }
+            />
+
+            {/* Promotional & Creator Campaigns */}
+            <Route
+              path="/campaigns"
+              element={
+                <PrivateRoute>
+                  <CampaignsPage />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/admin-dashboard/campaigns"
+              element={
+                <PrivateRoute>
+                  <CampaignsPage />
+                </PrivateRoute>
+              }
+            />
+
+            {/* Market Catalog: Ingredients Catalog, Categories & Meal Packs */}
+            <Route
+              path="/market-catalog"
+              element={
+                <PrivateRoute>
+                  <MarketCatalogPage defaultTab="catalog" />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/ingredients-catalog"
+              element={
+                <PrivateRoute>
+                  <MarketCatalogPage defaultTab="catalog" />
+                </PrivateRoute>
+              }
+            />
+            <Route
+              path="/meal-packs"
+              element={
+                <PrivateRoute>
+                  <MarketCatalogPage defaultTab="meal-packs" />
+                </PrivateRoute>
+              }
+            />
+
+            {/* Promotional Coupons */}
+            <Route
+              path="/coupons"
+              element={
+                <PrivateRoute>
+                  <CouponsPage />
                 </PrivateRoute>
               }
             />

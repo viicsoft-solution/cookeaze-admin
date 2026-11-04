@@ -1,0 +1,788 @@
+/* src/components/RecipeThemes.css */
+
+.rthemes-page {
+  max-width: 1440px;
+  margin: 0 auto;
+  color: #0f172a;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Header */
+.rthemes-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding-bottom: 18px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.rthemes-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 800;
+  color: #0f172a;
+  letter-spacing: -0.025em;
+}
+
+.rthemes-subtitle {
+  margin: 4px 0 0;
+  font-size: 13.5px;
+  color: #64748b;
+}
+
+.rthemes-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Buttons */
+.rthemes-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #334155;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.rthemes-btn:hover:not(:disabled) {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.rthemes-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.rthemes-btn--primary {
+  background: #129575;
+  border-color: #129575;
+  color: #ffffff;
+}
+
+.rthemes-btn--primary:hover:not(:disabled) {
+  background: #0e7a60;
+  border-color: #0e7a60;
+  color: #ffffff;
+}
+
+.rthemes-btn--danger {
+  background: #ffffff;
+  border-color: #fecaca;
+  color: #dc2626;
+}
+
+.rthemes-btn--danger:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #fca5a5;
+}
+
+.rthemes-btn--danger-solid {
+  background: #dc2626;
+  border-color: #dc2626;
+  color: #ffffff;
+}
+
+.rthemes-btn--danger-solid:hover:not(:disabled) {
+  background: #b91c1c;
+  border-color: #b91c1c;
+}
+
+.rthemes-btn--sm {
+  height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+  border-radius: 6px;
+}
+
+/* Alert Banner */
+.rthemes-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 11px 16px;
+  border-radius: 10px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.rthemes-alert--success {
+  background: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  color: #065f46;
+}
+
+.rthemes-alert--error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+
+/* 3 Compact KPI Strip */
+.rthemes-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.rthemes-kpi-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 15px 18px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
+.rthemes-kpi-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #64748b;
+  margin-bottom: 4px;
+}
+
+.rthemes-kpi-value {
+  font-size: 22px;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.1;
+}
+
+.rthemes-kpi-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: #ecfdf5;
+  color: #129575;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+/* Toolbar */
+.rthemes-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 10px 14px;
+  margin-bottom: 18px;
+}
+
+.rthemes-search {
+  position: relative;
+  flex: 1;
+  min-width: 240px;
+  max-width: 420px;
+}
+
+.rthemes-search-icon {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #94a3b8;
+  pointer-events: none;
+}
+
+.rthemes-search-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 32px 0 34px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 13px;
+  color: #0f172a;
+  outline: none;
+  transition: all 0.15s ease;
+}
+
+.rthemes-search-input::placeholder,
+.rthemes-input::placeholder {
+  color: #94a3b8;
+  opacity: 0.42;
+  font-weight: 400;
+}
+
+.rthemes-search-input::-webkit-input-placeholder,
+.rthemes-input::-webkit-input-placeholder {
+  color: #94a3b8;
+  opacity: 0.42;
+  font-weight: 400;
+}
+
+.rthemes-search-input:focus {
+  background: #ffffff;
+  border-color: #129575;
+  box-shadow: 0 0 0 3px rgba(18, 149, 117, 0.12);
+}
+
+.rthemes-search-clear {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: transparent;
+  color: #94a3b8;
+  cursor: pointer;
+  padding: 2px;
+  display: inline-flex;
+}
+
+.rthemes-select {
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+  outline: none;
+  cursor: pointer;
+}
+
+/* 4-Column Theme Cards Grid */
+.rthemes-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.rthemes-card {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, border-color 0.16s ease;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.rthemes-card:hover {
+  transform: translateY(-2px);
+  border-color: #cbd5e1;
+  box-shadow: 0 10px 22px -6px rgba(15, 23, 42, 0.09);
+}
+
+.rthemes-card-media {
+  position: relative;
+  height: 176px;
+  background: #f1f5f9;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.rthemes-card-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+  transition: transform 0.25s ease;
+}
+
+.rthemes-card:hover .rthemes-card-img {
+  transform: scale(1.03);
+}
+
+.rthemes-card-color-bar {
+  height: 4px;
+  width: 100%;
+}
+
+.rthemes-card-badge {
+  position: absolute;
+  bottom: 10px;
+  left: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.78);
+  backdrop-filter: blur(4px);
+  color: #ffffff;
+  font-size: 11.5px;
+  font-weight: 700;
+}
+
+.rthemes-card-swatch {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+.rthemes-card-body {
+  padding: 13px 14px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex: 1;
+}
+
+.rthemes-card-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+/* Mini Recipe Avatar Stack on Card */
+.rthemes-avatar-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.rthemes-avatars {
+  display: flex;
+  align-items: center;
+}
+
+.rthemes-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  object-fit: cover;
+  border: 2px solid #ffffff;
+  background: #e2e8f0;
+  margin-left: -7px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.rthemes-avatar:first-child {
+  margin-left: 0;
+}
+
+.rthemes-avatar-more {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 2px solid #ffffff;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 10px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: -7px;
+}
+
+.rthemes-card-footer {
+  padding: 9px 14px 12px;
+  border-top: 1px solid #f1f5f9;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rthemes-card-action {
+  flex: 1;
+  height: 30px;
+  border-radius: 7px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+
+.rthemes-card-action:hover {
+  background: #f8fafc;
+  border-color: #cbd5e1;
+  color: #0f172a;
+}
+
+.rthemes-card-action--icon {
+  flex: 0 0 30px;
+  padding: 0;
+  color: #dc2626;
+}
+
+.rthemes-card-action--icon:hover {
+  background: #fef2f2;
+  border-color: #fecaca;
+  color: #b91c1c;
+}
+
+/* Empty State */
+.rthemes-empty {
+  background: #ffffff;
+  border: 1px dashed #cbd5e1;
+  border-radius: 14px;
+  padding: 52px 24px;
+  text-align: center;
+}
+
+/* Modal Backdrop & Shell */
+.rthemes-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(2px);
+  z-index: 1050;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+.rthemes-modal {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  width: 100%;
+  max-width: 1040px;
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 48px rgba(15, 23, 42, 0.22);
+}
+
+.rthemes-modal--sm {
+  max-width: 440px;
+}
+
+.rthemes-modal--md {
+  max-width: 720px;
+}
+
+.rthemes-modal-header {
+  padding: 15px 20px;
+  border-bottom: 1px solid #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rthemes-modal-title {
+  margin: 0;
+  font-size: 16.5px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.rthemes-modal-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.rthemes-modal-footer {
+  padding: 13px 20px;
+  border-top: 1px solid #e2e8f0;
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* 2-Pane Builder Layout Inside Create/Edit Modal */
+.rthemes-builder-grid {
+  display: grid;
+  grid-template-columns: 330px minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.rthemes-builder-left {
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rthemes-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: #334155;
+  margin-bottom: 6px;
+}
+
+.rthemes-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 11px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  font-size: 13px;
+  color: #0f172a;
+  outline: none;
+}
+
+.rthemes-input:focus {
+  border-color: #129575;
+  box-shadow: 0 0 0 3px rgba(18, 149, 117, 0.12);
+}
+
+.rthemes-preview-box {
+  position: relative;
+  height: 148px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  background: #e2e8f0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rthemes-preview-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Color Presets Swatches */
+.rthemes-swatches {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rthemes-swatch-btn {
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 0 1px #cbd5e1;
+  cursor: pointer;
+  transition: transform 0.12s ease;
+}
+
+.rthemes-swatch-btn:hover {
+  transform: scale(1.1);
+}
+
+.rthemes-swatch-btn--active {
+  box-shadow: 0 0 0 2px #0f172a;
+  transform: scale(1.1);
+}
+
+/* Recipe Picker Inside Builder */
+.rthemes-picker-tabs {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.rthemes-seg {
+  display: inline-flex;
+  background: #f1f5f9;
+  padding: 3px;
+  border-radius: 8px;
+}
+
+.rthemes-seg-btn {
+  padding: 5px 12px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  font-weight: 700;
+  color: #64748b;
+  cursor: pointer;
+}
+
+.rthemes-seg-btn--active {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+}
+
+.rthemes-recipe-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  max-height: 360px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.rthemes-recipe-tile {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  cursor: pointer;
+  transition: all 0.14s ease;
+  text-align: left;
+}
+
+.rthemes-recipe-tile:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+.rthemes-recipe-tile--selected {
+  border-color: #129575;
+  background: #ecfdf5;
+}
+
+.rthemes-recipe-tile-img {
+  width: 46px;
+  height: 46px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #f1f5f9;
+  flex-shrink: 0;
+}
+
+.rthemes-recipe-tile-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #0f172a;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Shimmer */
+.rthemes-shimmer {
+  background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%);
+  background-size: 200% 100%;
+  animation: rthemesShimmer 1.4s infinite;
+}
+
+@keyframes rthemesShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@media (max-width: 1200px) {
+  .rthemes-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 920px) {
+  .rthemes-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .rthemes-builder-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .rthemes-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .rthemes-header-actions {
+    width: 100%;
+  }
+  .rthemes-header-actions .rthemes-btn {
+    flex: 1;
+  }
+  .rthemes-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .rthemes-search {
+    max-width: none;
+    min-width: 0;
+  }
+  .rthemes-modal-backdrop {
+    padding: 10px;
+  }
+  .rthemes-modal {
+    max-height: 92vh;
+  }
+  .rthemes-modal-header,
+  .rthemes-modal-body,
+  .rthemes-modal-footer {
+    padding: 14px;
+  }
+  .rthemes-picker-tabs {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .rthemes-picker-tabs .rthemes-seg {
+    width: 100%;
+  }
+  .rthemes-picker-tabs .rthemes-seg-btn {
+    flex: 1;
+  }
+}
+
+@media (max-width: 580px) {
+  .rthemes-kpi-grid,
+  .rthemes-grid,
+  .rthemes-recipe-picker-grid {
+    grid-template-columns: 1fr;
+  }
+}
+

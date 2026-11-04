@@ -1,513 +1,787 @@
-import React, { useEffect, useState } from "react";
-import { useParams, Link, useLocation } from "react-router-dom";
-import axios from "axios";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
+import {
+  ArrowLeft,
+  ShieldAlert,
+  ShieldCheck,
+  BookOpen,
+  Clock,
+  Star,
+  Eye,
+  Image as ImageIcon,
+  CheckCircle2,
+  AlertCircle,
+  X,
+  ChevronLeft,
+  ChevronRight,
+} from "lucide-react";
+import { getAxiosInstance } from "../api";
+import {
+  saveBannedCreatorRecord,
+  removeBannedCreatorRecord,
+} from "./CreatorsPage";
+import "./Creators.css";
 
-const API_BASE = "https://api.cookeaze.app/api";
+const BAN_REASON_PRESETS = [
+  "Violation of community recipe guidelines",
+  "Repeated copyright or stolen food photography",
+  "Spam or misleading culinary content",
+];
 
-const axiosInstance = axios.create({
-  baseURL: API_BASE,
-  headers: {
-    Accept: "application/json",
-  },
-});
-
-axiosInstance.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  else delete config.headers.Authorization;
-  return config;
-});
+function getInitials(name) {
+  const clean = String(name || "Creator").trim();
+  const parts = clean.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "CR";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+}
 
 export default function CreatorDetailPage() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const location = useLocation();
-  const is_banned_from_state = location.state?.is_banned || false;
-  
-  const [creator, setCreator] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const api = useMemo(() => getAxiosInstance(), []);
 
+  const isBannedFromState = Boolean(location.state?.is_banned);
+  const creatorFromState = location.state?.creator || null;
+
+  const [creator, setCreator] = useState(creatorFromState);
   const [recipes, setRecipes] = useState([]);
-  const [recipesLoading, setRecipesLoading] = useState(true);
+  const [loading, setLoading] = useState(!creatorFromState);
+  const [recipesLoading, setRecipesLoading] = useState(false);
+  const [toast, setToast] = useState(null);
+  const [avatarBroken, setAvatarBroken] = useState(false);
 
-  const [categoryFilter, setCategoryFilter] = useState("");
-  const [categories, setCategories] = useState([]);
-  
-  // Recipes Pagination
   const [recipePage, setRecipePage] = useState(1);
-  const [recipeTotalPages, setRecipeTotalPages] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [categoryFilter, setCategoryFilter] = useState("");
 
-  // Modal State for viewing single recipe
+  // Recipe Inspection Modal
   const [selectedRecipe, setSelectedRecipe] = useState(null);
-  const [modalTab, setModalTab] = useState("ingredients");
 
-  // Ban/Unban State
-  const [showBanModal, setShowBanModal] = useState(false);
+  // Ban / Unban Modal
+  const [banModalOpen, setBanModalOpen] = useState(false);
   const [banReason, setBanReason] = useState("");
   const [banLoading, setBanLoading] = useState(false);
 
-  // Fetch Profile
-  useEffect(() => {
-    let mounted = true;
-    setLoading(true);
-    
-    axiosInstance.get(`/public/creators/${id}/`)
-      .then((res) => {
-        if (!mounted) return;
-        const profileData = res.data?.data;
-        if (profileData && profileData.is_banned === undefined) {
-          profileData.is_banned = is_banned_from_state;
-        }
-        setCreator(profileData);
-        if (profileData && profileData.categories) {
-           setCategories(profileData.categories);
-        }
-      })
-      .catch((err) => {
-        console.error(err);
-        if (mounted) {
-          setError("Failed to load creator details. Please try again.");
-        }
-      })
-      .finally(() => {
-        if (mounted) setLoading(false);
-      });
+  const showToast = useCallback((type, message) => {
+    setToast({ type, message });
+  }, []);
 
-    return () => {
-      mounted = false;
-    };
-  }, [id]);
-
-  // Fetch Recipes
   useEffect(() => {
-    let mounted = true;
-    setRecipesLoading(true);
-    
-    let recipesUrl = `/public/creators/${id}/recipes/?page=${recipePage}`;
-    if (categoryFilter) {
-      recipesUrl += `&category=${encodeURIComponent(categoryFilter)}`;
+    if (!toast) return undefined;
+    const timer = setTimeout(() => setToast(null), 4500);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  const fetchCreatorProfile = useCallback(async () => {
+    if (!creatorFromState) setLoading(true);
+    try {
+      const res = await api.get(`/public/creators/${id}/`);
+      const data = res.data?.data ?? res.data;
+      if (data) {
+        setCreator((prev) => ({
+          ...(prev || {}),
+          ...data,
+          is_banned:
+            typeof data.is_banned === "boolean"
+              ? data.is_banned
+              : isBannedFromState || Boolean(prev?.is_banned),
+        }));
+      }
+    } catch (err) {
+      if (!creatorFromState) {
+        showToast(
+          "error",
+          err.response?.data?.message || "Failed to load creator profile."
+        );
+      }
+    } finally {
+      setLoading(false);
     }
-      
-    axiosInstance.get(recipesUrl)
-      .then((res) => {
-        if (!mounted) return;
-        const data = res.data?.data;
-        setRecipes(data?.results || []);
-        
-        // Attempt to calculate total pages (assuming default page size of 10)
-        const count = data?.count || 0;
-        setRecipeTotalPages(Math.max(1, Math.ceil(count / 10)));
-      })
-      .catch((err) => {
-        console.error(err);
-      })
-      .finally(() => {
-        if (mounted) setRecipesLoading(false);
+  }, [api, id, isBannedFromState, creatorFromState, showToast]);
+
+  const fetchCreatorRecipes = useCallback(async () => {
+    setRecipesLoading(true);
+    try {
+      const res = await api.get(`/public/creators/${id}/recipes/`, {
+        params: {
+          page: recipePage,
+          category: categoryFilter || undefined,
+        },
       });
+      const list = res.data?.data ?? [];
+      setRecipes(Array.isArray(list) ? list : []);
+      setTotalPages(res.data?.pagination?.total_pages || 1);
+    } catch (err) {
+      setRecipes([]);
+      if (!isBannedFromState) {
+        showToast(
+          "error",
+          err.response?.data?.message || "Failed to load creator recipes."
+        );
+      }
+    } finally {
+      setRecipesLoading(false);
+    }
+  }, [api, id, recipePage, categoryFilter, isBannedFromState, showToast]);
 
-    return () => {
-      mounted = false;
-    };
-  }, [id, categoryFilter, recipePage]);
+  useEffect(() => {
+    fetchCreatorProfile();
+  }, [fetchCreatorProfile]);
 
-  const handleCategoryChange = (e) => {
-    setCategoryFilter(e.target.value);
-    setRecipePage(1); // Reset to first page on filter change
-  };
+  useEffect(() => {
+    fetchCreatorRecipes();
+  }, [fetchCreatorRecipes]);
 
-  const goToRecipePage = (p) => {
-    if (p < 1 || p > recipeTotalPages) return;
-    setRecipePage(p);
-  };
+  const handleToggleBan = async () => {
+    if (!creator) return;
+    const isUnban = Boolean(creator.is_banned);
 
-  // Ban / Unban Handler
-  const handleBanUnban = async (action) => {
-    if (action === "ban" && !banReason.trim()) {
-      alert("Please provide a reason for banning this creator.");
+    if (!isUnban && !banReason.trim()) {
+      showToast("error", "Please enter or select a reason for banning.");
       return;
     }
+
     setBanLoading(true);
     try {
-      const payload = { action };
-      if (action === "ban") payload.reason = banReason;
-      await axiosInstance.post(`/users/${id}/ban-creator/`, payload);
-      alert(`Creator ${action === "ban" ? "banned" : "unbanned"} successfully!`);
-      setShowBanModal(false);
-      setBanReason("");
-      // Update local creator state to reflect the change
-      setCreator(prev => ({ ...prev, is_banned: action === "ban" }));
+      const payload = {
+        action: isUnban ? "unban" : "ban",
+        ...(isUnban ? {} : { reason: banReason.trim() }),
+      };
+
+      const res = await api.post(`/users/${creator.id}/ban-creator/`, payload);
+      if (res.data?.status === "success" || res.status === 200) {
+        if (isUnban) {
+          removeBannedCreatorRecord(creator.id);
+        } else {
+          saveBannedCreatorRecord(creator, banReason.trim());
+        }
+        setCreator((prev) => ({
+          ...prev,
+          is_banned: !isUnban,
+          ban_reason: isUnban ? "" : banReason.trim(),
+        }));
+        setBanModalOpen(false);
+        setBanReason("");
+        showToast(
+          "success",
+          isUnban
+            ? `Restored ${creator.creator_name} to active status.`
+            : `Banned ${creator.creator_name}.`
+        );
+      }
     } catch (err) {
-      console.error(err);
-      const msg = err?.response?.data?.message || `Failed to ${action} creator.`;
-      alert(msg);
+      showToast(
+        "error",
+        err.response?.data?.message || "Failed to update creator standing."
+      );
     } finally {
       setBanLoading(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="container py-5 text-center">
-        <div className="spinner-border text-primary" role="status" />
-        <p className="mt-2 text-muted">Loading profile...</p>
-      </div>
-    );
-  }
-
-  if (error || !creator) {
-    return (
-      <div className="container py-5 text-center">
-        <div className="alert alert-danger d-inline-block shadow-sm">
-          {error || "Creator not found."}
-        </div>
-        <div>
-          <Link to="/creators" className="btn btn-outline-secondary mt-3">
-            &larr; Back to Creators
-          </Link>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="container py-4">
-      {/* Back Link */}
-      <div className="mb-4">
-        <Link to="/creators" className="text-decoration-none text-muted">
-          &larr; Back to System Creators
-        </Link>
+    <div className="cr-page">
+      {/* Top Bar */}
+      <div className="cr-header">
+        <div className="cr-header-left">
+          <div>
+            <button
+              type="button"
+              className="cr-btn cr-btn-secondary cr-btn-sm"
+              onClick={() => navigate("/creators")}
+            >
+              <ArrowLeft size={14} />
+              Back to Creators
+            </button>
+          </div>
+          <h1 className="cr-title" style={{ marginTop: 6 }}>
+            {creator?.creator_name || "Creator Profile"}
+          </h1>
+          <p className="cr-subtitle">
+            Review published recipes, culinary categories, and account moderation controls.
+          </p>
+        </div>
       </div>
 
-      {/* Profile Header Card */}
-      <div className="card border-0 shadow-sm mb-5 overflow-hidden">
-        <div 
-          className="card-header border-0 bg-primary bg-gradient" 
-          style={{ height: 120 }}
-        ></div>
-        <div className="card-body px-4 pb-4 bg-white position-relative">
-          <div className="d-flex flex-column flex-md-row position-relative" style={{ marginTop: -70 }}>
-            <div className="me-4 mb-3 mb-md-0">
-              <img
-                src={creator.profile_picture_url || "https://via.placeholder.com/150"}
-                alt={creator.creator_name}
-                className="rounded-circle shadow border border-white border-4"
-                style={{ width: 140, height: 140, objectFit: "cover", backgroundColor: "#fff" }}
+      {/* Toast Feedback */}
+      {toast && (
+        <div className={`cr-toast ${toast.type}`}>
+          <div className="cr-toast-left">
+            {toast.type === "error" ? (
+              <AlertCircle size={17} />
+            ) : (
+              <CheckCircle2 size={17} />
+            )}
+            <span>{toast.message}</span>
+          </div>
+          <button
+            type="button"
+            className="cr-toast-close"
+            onClick={() => setToast(null)}
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="cr-profile-hero">
+          <div className="cr-profile-hero-left">
+            <div
+              className="cr-shimmer"
+              style={{ width: 88, height: 88, borderRadius: "50%" }}
+            />
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <div
+                  className="cr-shimmer"
+                  style={{ width: 170, height: 22 }}
+                />
+                <div
+                  className="cr-shimmer"
+                  style={{ width: 100, height: 22, borderRadius: 999 }}
+                />
+              </div>
+              <div
+                className="cr-shimmer"
+                style={{ width: "80%", height: 14 }}
+              />
+              <div
+                className="cr-shimmer"
+                style={{ width: "55%", height: 14 }}
               />
             </div>
-            
-            <div className="pt-md-5 pt-3 w-100">
-              <h2 className="fw-bold mb-1">{creator.creator_name}</h2>
-              <p className="text-muted d-flex align-items-center mb-3">
-                <span className="me-3">
-                  <strong>{creator.total_recipes}</strong> Published Recipes
-                </span>
-              </p>
-              
-              {creator.description && (
-                <div className="bg-light p-3 rounded mb-3">
-                  <h6 className="fw-bold fs-6 mb-2">About</h6>
-                  <p className="mb-0 small text-secondary lh-lg">
-                    {creator.description}
-                  </p>
-                </div>
-              )}
-              
-              {creator.primary_cuisines && creator.primary_cuisines.length > 0 && (
-                <div className="mt-3">
-                  <h6 className="fw-bold fs-6 mb-2">Specialties</h6>
-                  {creator.primary_cuisines.map((c, i) => (
-                    <span key={i} className="badge bg-secondary me-1">
-                      {c}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
           </div>
+          <div
+            className="cr-shimmer"
+            style={{ width: 120, height: 38, borderRadius: 9 }}
+          />
+        </div>
+      ) : !creator ? (
+        <div className="cr-empty">
+          <h4>Creator not found</h4>
+          <button
+            type="button"
+            className="cr-btn cr-btn-secondary"
+            onClick={() => navigate("/creators")}
+          >
+            Return to Creators
+          </button>
+        </div>
+      ) : (
+        <>
+          {/* Creator Hero Card */}
+          <div className="cr-profile-hero">
+            <div className="cr-profile-hero-left">
+              {creator.profile_picture_url && !avatarBroken ? (
+                <img
+                  src={creator.profile_picture_url}
+                  alt={creator.creator_name}
+                  className="cr-avatar lg"
+                  onError={() => setAvatarBroken(true)}
+                />
+              ) : (
+                <div className="cr-avatar lg">
+                  {getInitials(creator.creator_name)}
+                </div>
+              )}
 
-          {/* Ban/Unban Action Bar */}
-          <div className="px-4 pb-4 d-flex justify-content-end gap-2 align-items-center">
-            {creator.is_banned && (
-              <span className="badge bg-danger rounded-pill px-3 py-2 me-auto">
-                🚫 Creator is Banned
-              </span>
-            )}
-            {creator.is_banned ? (
+              <div style={{ flex: 1 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <h2
+                    style={{
+                      margin: 0,
+                      fontSize: "1.25rem",
+                      fontWeight: 700,
+                      color: "#0f172a",
+                    }}
+                  >
+                    {creator.creator_name}
+                  </h2>
+                  <span
+                    className={`cr-badge ${
+                      creator.is_banned ? "banned" : "active"
+                    }`}
+                  >
+                    {creator.is_banned ? "Banned Creator" : "Verified Creator"}
+                  </span>
+                  <span className="cr-badge neutral">
+                    <BookOpen size={12} />
+                    {creator.total_recipes || recipes.length || 0} Published Recipes
+                  </span>
+                </div>
+
+                <p
+                  style={{
+                    margin: "10px 0 0 0",
+                    fontSize: "0.88rem",
+                    color: "#475569",
+                    lineHeight: 1.55,
+                  }}
+                >
+                  {creator.description ||
+                    creator.bio ||
+                    "This creator has not added a biography yet."}
+                </p>
+
+                {Array.isArray(creator.recipe_categories) &&
+                  creator.recipe_categories.length > 0 && (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: 6,
+                        marginTop: 14,
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="cr-reason-pill"
+                        style={
+                          categoryFilter === ""
+                            ? {
+                                background: "#129575",
+                                color: "#ffffff",
+                                borderColor: "#129575",
+                              }
+                            : undefined
+                        }
+                        onClick={() => {
+                          setCategoryFilter("");
+                          setRecipePage(1);
+                        }}
+                      >
+                        All Categories
+                      </button>
+                      {creator.recipe_categories
+                        .filter(
+                          (cat) =>
+                            !["souschef", "souchef"].includes(
+                              String(cat).trim().toLowerCase()
+                            )
+                        )
+                        .map((cat, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            className="cr-reason-pill"
+                            style={
+                              categoryFilter === cat
+                                ? {
+                                    background: "#129575",
+                                    color: "#ffffff",
+                                    borderColor: "#129575",
+                                  }
+                                : undefined
+                            }
+                            onClick={() => {
+                              setCategoryFilter(cat);
+                              setRecipePage(1);
+                            }}
+                          >
+                            {cat}
+                          </button>
+                        ))}
+                    </div>
+                  )}
+              </div>
+            </div>
+
+            <div>
               <button
-                className="btn btn-success rounded-pill px-4 fw-semibold"
-                onClick={() => handleBanUnban("unban")}
-                disabled={banLoading}
+                type="button"
+                className={`cr-btn ${
+                  creator.is_banned ? "cr-btn-soft" : "cr-btn-danger-ghost"
+                }`}
+                onClick={() => setBanModalOpen(true)}
               >
-                {banLoading ? (
-                  <><span className="spinner-border spinner-border-sm me-2" role="status"></span>Processing...</>
+                {creator.is_banned ? (
+                  <>
+                    <ShieldCheck size={15} />
+                    Unban Creator
+                  </>
                 ) : (
-                  <>✅ Unban Creator</>
+                  <>
+                    <ShieldAlert size={15} />
+                    Ban Creator
+                  </>
                 )}
               </button>
-            ) : (
+            </div>
+          </div>
+
+          {/* Creator Recipes Section */}
+          <div className="cr-toolbar">
+            <div style={{ fontWeight: 700, fontSize: "0.95rem", color: "#0f172a" }}>
+              Published Recipes{" "}
+              {categoryFilter && (
+                <span style={{ color: "#129575" }}>· {categoryFilter}</span>
+              )}
+            </div>
+
+            {categoryFilter && (
               <button
-                className="btn btn-outline-danger rounded-pill px-4 fw-semibold"
-                onClick={() => { setShowBanModal(true); setBanReason(""); }}
+                type="button"
+                className="cr-btn cr-btn-secondary cr-btn-sm"
+                onClick={() => {
+                  setCategoryFilter("");
+                  setRecipePage(1);
+                }}
               >
-                🚫 Ban Creator
+                <X size={13} />
+                Clear Filter
               </button>
             )}
           </div>
-        </div>
-      </div>
 
-      {/* Recipes Section */}
-      <div className="d-flex flex-wrap justify-content-between align-items-center mb-3">
-        <h4 className="fw-bold mb-0">Recipes by {creator.creator_name}</h4>
-        
-        <select
-          className="form-select form-select-sm"
-          style={{ width: "auto", minWidth: 150 }}
-          value={categoryFilter}
-          onChange={handleCategoryChange}
-        >
-          <option value="">All Categories</option>
-          {categories.map((cat) => (
-            <option key={cat.id} value={cat.name}>
-              {cat.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {recipesLoading ? (
-        <div className="py-5 text-center w-100">
-          <div className="spinner-border text-primary" role="status" />
-        </div>
-      ) : recipes.length > 0 ? (
-        <>
-          <div className="row g-3">
-            {recipes.map((r) => (
-              <div className="col-sm-6 col-md-4 col-lg-3" key={r.id}>
-                <div 
-                  className="card h-100 shadow-sm border-0" 
-                  style={{ cursor: "pointer", transition: "transform 0.2s" }}
-                  onClick={() => {
-                    setSelectedRecipe(r);
-                    setModalTab("ingredients");
-                  }}
-                  onMouseEnter={(e) => e.currentTarget.style.transform = "scale(1.02)"}
-                  onMouseLeave={(e) => e.currentTarget.style.transform = "scale(1)"}
-                >
-                  <img
-                    src={r.image_url || "https://via.placeholder.com/300x200"}
-                    className="card-img-top"
-                    alt={r.name}
-                    style={{ height: 160, objectFit: "cover" }}
+          {recipesLoading ? (
+            <div className="cr-recipe-grid">
+              {Array.from({ length: 8 }).map((_, idx) => (
+                <div key={idx} className="cr-recipe-card">
+                  <div
+                    className="cr-recipe-media cr-shimmer"
+                    style={{ borderRadius: 0 }}
                   />
-                  <div className="card-body p-3 d-flex flex-column">
-                    <h6 className="card-title fw-bold mb-1 text-truncate" title={r.name}>{r.name}</h6>
-                    
-                    <div className="small text-muted mb-2">
-                      <div className="d-flex justify-content-between">
-                        <span>⏱️ {r.total_time} mins</span>
-                        <span>⭐ {r.rating}</span>
-                      </div>
-                    </div>
-                    
-                    <div className="mb-2">
-                      {r.category && r.category.length > 0 && r.category.slice(0, 2).map((c, i) => (
-                        <span key={i} className="badge bg-light text-dark me-1 border small">
-                          {c}
-                        </span>
-                      ))}
-                    </div>
-
-                    <div className="mt-auto d-flex justify-content-between align-items-center">
-                      <span className="fw-bold text-success small">
-                        {r.price ? `₦${r.price}` : "Free"}
-                      </span>
-                      {r.isExclusive && (
-                        <span className="badge bg-warning text-dark small">Exclusive</span>
-                      )}
+                  <div className="cr-recipe-body">
+                    <div
+                      className="cr-shimmer"
+                      style={{ width: "75%", height: 15 }}
+                    />
+                    <div
+                      className="cr-shimmer"
+                      style={{ width: "52%", height: 12 }}
+                    />
+                    <div style={{ marginTop: "auto", paddingTop: 10 }}>
+                      <div
+                        className="cr-shimmer"
+                        style={{ width: "100%", height: 32 }}
+                      />
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
-          </div>
-          
-          {/* Pagination Controls */}
-          {recipeTotalPages > 1 && (
-            <nav className="d-flex justify-content-center mt-4">
-              <ul className="pagination pagination-sm mb-0">
-                <li className={`page-item ${recipePage === 1 ? "disabled" : ""}`}>
-                  <button className="page-link" onClick={() => goToRecipePage(recipePage - 1)}>
-                    Prev
-                  </button>
-                </li>
-                {[...Array(recipeTotalPages).keys()].map((n) => (
-                  <li key={n} className={`page-item ${recipePage === n + 1 ? "active" : ""}`}>
-                    <button className="page-link" onClick={() => goToRecipePage(n + 1)}>
-                      {n + 1}
-                    </button>
-                  </li>
-                ))}
-                <li className={`page-item ${recipePage === recipeTotalPages ? "disabled" : ""}`}>
-                  <button className="page-link" onClick={() => goToRecipePage(recipePage + 1)}>
-                    Next
-                  </button>
-                </li>
-              </ul>
-            </nav>
-          )}
-        </>
-      ) : (
-        <div className="card border-0 shadow-sm p-5 text-center">
-          <p className="text-muted mb-0">No recipes found for this creator.</p>
-        </div>
-      )}
-
-      {/* Recipe Detail Modal */}
-      {selectedRecipe && (
-        <>
-          <div className="modal show d-block" tabIndex="-1" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
-            <div className="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg">
-              <div className="modal-content">
-                <div className="modal-header border-0 pb-0">
-                  <h5 className="modal-title fw-bold text-truncate w-100">{selectedRecipe.name}</h5>
-                  <button 
-                    type="button" 
-                    className="btn-close" 
-                    onClick={() => setSelectedRecipe(null)}
-                    aria-label="Close"
-                  ></button>
-                </div>
-                <div className="modal-body">
-                  <div className="d-flex mb-3 gap-2">
-                    <button 
-                      className={`btn btn-sm ${modalTab === "ingredients" ? "btn-primary" : "btn-outline-primary"}`}
-                      onClick={() => setModalTab("ingredients")}
-                    >
-                      Ingredients
-                    </button>
-                    <button 
-                      className={`btn btn-sm ${modalTab === "steps" ? "btn-primary" : "btn-outline-primary"}`}
-                      onClick={() => setModalTab("steps")}
-                    >
-                      Steps
-                    </button>
-                  </div>
-
-                  {modalTab === "ingredients" && (
-                    <div>
-                      {selectedRecipe.ingredients && selectedRecipe.ingredients.length > 0 ? (
-                        <ul className="list-group list-group-flush rounded border">
-                          {selectedRecipe.ingredients.map(ing => (
-                            <li className="list-group-item d-flex justify-content-between align-items-center" key={ing.id}>
-                              <span>{ing.name}</span>
-                              <span className="badge bg-light text-dark border">
-                                {ing.quantity} {ing.unit !== "as needed" ? ing.unit : ""}
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      ) : (
-                        <p className="text-muted text-center py-4">No ingredients provided.</p>
-                      )}
-                    </div>
-                  )}
-
-                  {modalTab === "steps" && (
-                    <div>
-                      {selectedRecipe.steps && selectedRecipe.steps.length > 0 ? (
-                        <div className="list-group list-group-flush rounded border">
-                          {selectedRecipe.steps.sort((a,b)=> a.step_number - b.step_number).map(step => (
-                            <div className="list-group-item py-3" key={step.id}>
-                              <div className="d-flex w-100 justify-content-between mb-2">
-                                <h6 className="mb-0 fw-bold">Step {step.step_number} <span className="badge bg-secondary ms-2 fw-normal">{step.step_type}</span></h6>
-                                <small className="text-muted">⏱️ {step.duration} mins</small>
-                              </div>
-                              <p className="mb-1 small text-dark" style={{ whiteSpace: "pre-wrap" }}>{step.description}</p>
-                              {step.what_to_look_out_for && (
-                                <div className="mt-2 p-2 bg-light border-start border-warning border-3 small">
-                                  <strong>Look out for: </strong> {step.what_to_look_out_for}
-                                </div>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <p className="text-muted text-center py-4">No steps provided.</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
+              ))}
             </div>
-          </div>
-        </>
-      )}
+          ) : recipes.length === 0 ? (
+            <div className="cr-empty">
+              <BookOpen size={26} style={{ color: "#94a3b8" }} />
+              <h4>No recipes found</h4>
+              <p>
+                {categoryFilter
+                  ? `No recipes found in "${categoryFilter}".`
+                  : "This creator has not published any recipes yet."}
+              </p>
+            </div>
+          ) : (
+            <div className="cr-recipe-grid">
+              {recipes.map((recipe) => (
+                <div key={recipe.id} className="cr-recipe-card">
+                  <div className="cr-recipe-media">
+                    {recipe.image_url ? (
+                      <img src={recipe.image_url} alt={recipe.name} />
+                    ) : (
+                      <div
+                        style={{
+                          width: "100%",
+                          height: "100%",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          color: "#94a3b8",
+                        }}
+                      >
+                        <ImageIcon size={24} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="cr-recipe-body">
+                    <h3 className="cr-recipe-title">{recipe.name}</h3>
+                    <div className="cr-recipe-meta">
+                      <span>
+                        <Clock size={12} style={{ marginRight: 4 }} />
+                        {recipe.total_time || 0} mins
+                      </span>
+                      <span>
+                        <Star
+                          size={12}
+                          style={{ marginRight: 4, color: "#f59e0b" }}
+                        />
+                        {recipe.average_rating ?? "New"}
+                      </span>
+                    </div>
 
-      {/* Ban Creator Modal */}
-      {showBanModal && (
-        <div className="modal show d-block" tabIndex="-1" style={{ backgroundColor: "rgba(0,0,0,0.6)" }}>
-          <div className="modal-dialog modal-dialog-centered">
-            <div className="modal-content border-0 shadow-lg overflow-hidden">
-              <div className="modal-header bg-danger text-white border-0 py-3 px-4">
-                <h5 className="modal-title fw-bold mb-0">
-                  <span className="me-2">🚫</span> Ban {creator.creator_name}
-                </h5>
+                    <div style={{ marginTop: "auto", paddingTop: 10 }}>
+                      <button
+                        type="button"
+                        className="cr-btn cr-btn-secondary cr-btn-sm"
+                        style={{ width: "100%" }}
+                        onClick={() => setSelectedRecipe(recipe)}
+                      >
+                        <Eye size={13} />
+                        Inspect Recipe
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {totalPages > 1 && (
+            <div className="cr-pagination">
+              <span className="cr-page-info">
+                Page <strong>{recipePage}</strong> of{" "}
+                <strong>{totalPages}</strong>
+              </span>
+              <div style={{ display: "flex", gap: 8 }}>
                 <button
                   type="button"
-                  className="btn-close btn-close-white"
-                  onClick={() => { setShowBanModal(false); setBanReason(""); }}
-                  disabled={banLoading}
-                ></button>
+                  className="cr-btn cr-btn-secondary cr-btn-sm"
+                  disabled={recipePage <= 1}
+                  onClick={() => setRecipePage((p) => Math.max(1, p - 1))}
+                >
+                  <ChevronLeft size={14} />
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  className="cr-btn cr-btn-secondary cr-btn-sm"
+                  disabled={recipePage >= totalPages}
+                  onClick={() =>
+                    setRecipePage((p) => Math.min(totalPages, p + 1))
+                  }
+                >
+                  Next
+                  <ChevronRight size={14} />
+                </button>
               </div>
-              <div className="modal-body p-4">
-                <div className="d-flex align-items-center gap-3 mb-4 p-3 bg-light rounded">
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Recipe Inspection Modal */}
+      {selectedRecipe && (
+        <div
+          className="cr-modal-backdrop"
+          onClick={() => setSelectedRecipe(null)}
+        >
+          <div
+            className="cr-modal-card wide"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="cr-modal-header">
+              <h3>{selectedRecipe.name}</h3>
+              <button
+                type="button"
+                className="cr-modal-close"
+                onClick={() => setSelectedRecipe(null)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="cr-modal-body">
+              {selectedRecipe.image_url && (
+                <div
+                  style={{
+                    width: "100%",
+                    height: 220,
+                    borderRadius: 11,
+                    overflow: "hidden",
+                    border: "1px solid #e2e8f0",
+                  }}
+                >
                   <img
-                    src={creator.profile_picture_url || "https://via.placeholder.com/50"}
-                    alt={creator.creator_name}
-                    className="rounded-circle shadow-sm"
-                    style={{ width: 50, height: 50, objectFit: "cover" }}
+                    src={selectedRecipe.image_url}
+                    alt={selectedRecipe.name}
+                    style={{
+                      width: "100%",
+                      height: "100%",
+                      objectFit: "cover",
+                    }}
                   />
-                  <div>
-                    <h6 className="fw-bold mb-0">{creator.creator_name}</h6>
-                    <small className="text-muted">{creator.total_recipes} recipes will be hidden</small>
+                </div>
+              )}
+
+              <div className="cr-review-grid">
+                <div className="cr-info-block">
+                  <span className="cr-info-label">Cooking Times & Servings</span>
+                  <div className="cr-info-value">
+                    Prep: {selectedRecipe.duration || 0}m · Total:{" "}
+                    {selectedRecipe.total_time || 0}m · Servings:{" "}
+                    {selectedRecipe.servings || 1}
                   </div>
                 </div>
 
-                <div className="alert alert-warning border-0 shadow-sm small mb-3">
-                  <strong>⚠️ Warning:</strong> Banning this creator will hide all their recipes from the platform. This action can be reversed.
+                <div className="cr-info-block">
+                  <span className="cr-info-label">Nutrition Facts</span>
+                  <div className="cr-info-value">
+                    {selectedRecipe.nutritional_value
+                      ? `${selectedRecipe.nutritional_value.calories || 0} kcal · P: ${
+                          selectedRecipe.nutritional_value.protein || 0
+                        }g · C: ${
+                          selectedRecipe.nutritional_value.carbs || 0
+                        }g · F: ${selectedRecipe.nutritional_value.fat || 0}g`
+                      : "Not specified"}
+                  </div>
                 </div>
+              </div>
 
-                <label className="form-label fw-semibold">Reason for Ban <span className="text-danger">*</span></label>
-                <textarea
-                  className="form-control"
-                  rows="3"
-                  placeholder="Explain why this creator is being banned..."
-                  value={banReason}
-                  onChange={(e) => setBanReason(e.target.value)}
-                  disabled={banLoading}
-                ></textarea>
+              <div className="cr-info-block">
+                <span className="cr-info-label">Ingredients</span>
+                {Array.isArray(selectedRecipe.ingredients) &&
+                selectedRecipe.ingredients.length > 0 ? (
+                  <ul
+                    style={{
+                      margin: "6px 0 0 0",
+                      paddingLeft: 18,
+                      fontSize: "0.85rem",
+                      color: "#334155",
+                    }}
+                  >
+                    {selectedRecipe.ingredients.map((ing, idx) => (
+                      <li key={idx} style={{ marginBottom: 4 }}>
+                        <strong>{ing.name}</strong> — {ing.quantity} {ing.unit}{" "}
+                        {ing.No_of_servings
+                          ? `(${ing.No_of_servings} servings)`
+                          : ""}
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <div className="cr-info-value">No ingredients listed</div>
+                )}
               </div>
-              <div className="modal-footer border-0 px-4 pb-4 pt-0">
-                <button
-                  className="btn btn-light border px-4"
-                  onClick={() => { setShowBanModal(false); setBanReason(""); }}
-                  disabled={banLoading}
-                >
-                  Cancel
-                </button>
-                <button
-                  className="btn btn-danger fw-bold px-4"
-                  onClick={() => handleBanUnban("ban")}
-                  disabled={banLoading || !banReason.trim()}
-                >
-                  {banLoading ? (
-                    <><span className="spinner-border spinner-border-sm me-2" role="status"></span>Banning...</>
-                  ) : (
-                    "Confirm Ban"
-                  )}
-                </button>
+
+              <div className="cr-info-block">
+                <span className="cr-info-label">Preparation Steps</span>
+                {Array.isArray(selectedRecipe.steps) &&
+                selectedRecipe.steps.length > 0 ? (
+                  <ol
+                    style={{
+                      margin: "6px 0 0 0",
+                      paddingLeft: 18,
+                      fontSize: "0.85rem",
+                      color: "#334155",
+                    }}
+                  >
+                    {selectedRecipe.steps.map((step, idx) => (
+                      <li key={idx} style={{ marginBottom: 6 }}>
+                        {step.description}
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <div className="cr-info-value">No steps listed</div>
+                )}
               </div>
+            </div>
+
+            <div className="cr-modal-footer">
+              <button
+                type="button"
+                className="cr-btn cr-btn-secondary"
+                onClick={() => setSelectedRecipe(null)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Ban / Unban Creator Modal */}
+      {banModalOpen && creator && (
+        <div
+          className="cr-modal-backdrop"
+          onClick={() => !banLoading && setBanModalOpen(false)}
+        >
+          <div
+            className="cr-modal-card"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="cr-modal-header">
+              <h3>
+                {creator.is_banned
+                  ? `Unban ${creator.creator_name}`
+                  : `Ban ${creator.creator_name}`}
+              </h3>
+              <button
+                type="button"
+                className="cr-modal-close"
+                onClick={() => setBanModalOpen(false)}
+                disabled={banLoading}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="cr-modal-body">
+              {creator.is_banned ? (
+                <p style={{ margin: 0, fontSize: "0.9rem", color: "#334155" }}>
+                  Are you sure you want to unban{" "}
+                  <strong>{creator.creator_name}</strong>?
+                </p>
+              ) : (
+                <>
+                  <p style={{ margin: 0, fontSize: "0.86rem", color: "#475569" }}>
+                    Select or write a reason for banning{" "}
+                    <strong>{creator.creator_name}</strong>:
+                  </p>
+                  <div className="cr-reason-pills">
+                    {BAN_REASON_PRESETS.map((preset) => (
+                      <button
+                        key={preset}
+                        type="button"
+                        className="cr-reason-pill"
+                        onClick={() => setBanReason(preset)}
+                      >
+                        {preset}
+                      </button>
+                    ))}
+                  </div>
+                  <textarea
+                    className="cr-textarea"
+                    placeholder="Enter reason for banning this creator..."
+                    value={banReason}
+                    onChange={(e) => setBanReason(e.target.value)}
+                  />
+                </>
+              )}
+            </div>
+
+            <div className="cr-modal-footer">
+              <button
+                type="button"
+                className="cr-btn cr-btn-secondary"
+                onClick={() => setBanModalOpen(false)}
+                disabled={banLoading}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className={`cr-btn ${
+                  creator.is_banned ? "cr-btn-primary" : "cr-btn-danger"
+                }`}
+                onClick={handleToggleBan}
+                disabled={banLoading}
+              >
+                {banLoading
+                  ? "Processing..."
+                  : creator.is_banned
+                  ? "Confirm Unban"
+                  : "Ban Creator"}
+              </button>
             </div>
           </div>
         </div>

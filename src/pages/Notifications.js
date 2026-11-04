@@ -1,56 +1,329 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import {
-  Send,
-  Bell,
-  UtensilsCrossed,
-  ChefHat,
+  Upload,
   X,
-  Search,
-  CheckCircle,
+  CheckCircle2,
   AlertCircle,
-  Loader,
-  Activity
+  Clock,
+  ChevronDown,
+  ChevronUp,
+  RotateCcw,
+  Send,
 } from "lucide-react";
-import "bootstrap/dist/css/bootstrap.min.css";
-import { useAuth } from "../contexts/AuthProvider"; // <-- added
-import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js';
-import { Pie } from 'react-chartjs-2';
-
-ChartJS.register(ArcElement, Tooltip, Legend);
+import { axiosInstance, ensureValidToken } from "../api";
+import { useAuth } from "../contexts/AuthProvider";
+import CloudinaryService from "../components/cloudinaryService";
+import "./Notifications.css";
 
 const API_BASE = "https://api.cookeaze.app/api";
-// removed const AUTH_TOKEN
+const HISTORY_STORAGE_KEY = "cookeaze_notification_history_v1";
+const RECIPES_CACHE_KEY = "cookeaze_recipes_catalog_v4";
 
-const NotificationAdmin = () => {
-  const { token } = useAuth(); // <-- get token from context
-  const [activeTab, setActiveTab] = useState("broadcast");
+const BROADCAST_PRESETS = [
+  {
+    label: "Weekend Specials",
+    title: "Fresh Weekend Recipes Are Here!",
+    body: "Explore hand-picked chef specials and step-by-step meal guides for your weekend table.",
+  },
+  {
+    label: "Weekly Meal Plan",
+    title: "Plan Your Week with Cookeaze",
+    body: "Save time and eat better this week—discover quick 30-minute recipes curated for you.",
+  },
+  {
+    label: "Ask SousChef",
+    title: "Have Ingredients in Your Fridge?",
+    body: "Open Cookeaze and let SousChef craft a custom step-by-step recipe in seconds.",
+  },
+];
+
+const MEAL_PRESETS = {
+  breakfast: {
+    title: "Good Morning! What's for Breakfast?",
+    body: "Start your day right with quick, energizing breakfast ideas ready in under 20 minutes.",
+  },
+  lunch: {
+    title: "Lunchtime Inspiration Awaits",
+    body: "Take a break and whip up a fresh, flavorful lunch from your Cookeaze kitchen.",
+  },
+  dinner: {
+    title: "What's Cooking for Dinner Tonight?",
+    body: "Let's find a delicious, comforting recipe to end your day on a high note!",
+  },
+};
+
+function loadRecentHistory() {
+  try {
+    const raw = localStorage.getItem(HISTORY_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.slice(0, 8) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentHistory(list) {
+  try {
+    localStorage.setItem(
+      HISTORY_STORAGE_KEY,
+      JSON.stringify((list || []).slice(0, 8))
+    );
+  } catch {
+    // ignore storage errors
+  }
+}
+
+function getCachedRecipes() {
+  try {
+    const raw =
+      sessionStorage.getItem("cookeaze_recipes_catalog_v5") ||
+      localStorage.getItem("cookeaze_recipes_catalog_v5") ||
+      sessionStorage.getItem(RECIPES_CACHE_KEY) ||
+      localStorage.getItem(RECIPES_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed?.items) && parsed.items.length > 0) {
+      return parsed.items;
+    }
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      return parsed;
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return [];
+}
+
+function extractRecipesPayload(resData) {
+  if (!resData) return { results: [], count: 0 };
+  const root = resData.data !== undefined ? resData.data : resData;
+  if (Array.isArray(root)) {
+    return { results: root, count: root.length };
+  }
+  const results = Array.isArray(root?.results)
+    ? root.results
+    : Array.isArray(resData?.results)
+    ? resData.results
+    : [];
+  const count =
+    typeof root?.count === "number"
+      ? root.count
+      : typeof resData?.count === "number"
+      ? resData.count
+      : results.length;
+  return { results, count };
+}
+
+function parseJsonDraft(rawText) {
+  const trimmed = String(rawText || "").trim();
+  if (!trimmed) return { ok: true, value: {} };
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return { ok: true, value: parsed };
+    }
+    return {
+      ok: false,
+      error: 'Custom data must be a JSON object (e.g. {"screen": "home"}).',
+    };
+  } catch {
+    return {
+      ok: false,
+      error: "Invalid JSON syntax. Check quotes and commas.",
+    };
+  }
+}
+
+function pickNumber(...candidates) {
+  for (let i = 0; i < candidates.length; i += 1) {
+    const val = candidates[i];
+    if (typeof val === "number" && Number.isFinite(val)) {
+      return val;
+    }
+    if (typeof val === "string" && val.trim() !== "") {
+      const cleaned = val.replace(/%/g, "").trim();
+      const num = Number(cleaned);
+      if (Number.isFinite(num)) {
+        return num;
+      }
+    }
+  }
+  return null;
+}
+
+function normalizeDeliveryReport(rawResponse, meta = {}) {
+  const root = rawResponse && typeof rawResponse === "object" ? rawResponse : {};
+  const inner =
+    root.data && typeof root.data === "object" && !Array.isArray(root.data)
+      ? root.data
+      : root;
+  const delivery =
+    inner.delivery && typeof inner.delivery === "object"
+      ? inner.delivery
+      : root.delivery && typeof root.delivery === "object"
+      ? root.delivery
+      : inner.stats && typeof inner.stats === "object"
+      ? inner.stats
+      : inner;
+  const maintenance =
+    inner.maintenance && typeof inner.maintenance === "object"
+      ? inner.maintenance
+      : root.maintenance && typeof root.maintenance === "object"
+      ? root.maintenance
+      : {};
+  const metadata =
+    inner.metadata && typeof inner.metadata === "object"
+      ? inner.metadata
+      : root.metadata && typeof root.metadata === "object"
+      ? root.metadata
+      : {};
+
+  let totalDevices = pickNumber(
+    delivery.total_devices,
+    delivery.total_tokens,
+    delivery.devices_count,
+    delivery.target_devices,
+    delivery.total,
+    inner.total_devices,
+    inner.total_tokens,
+    inner.total,
+    root.total_devices
+  );
+
+  let successCount = pickNumber(
+    delivery.success_count,
+    delivery.delivered_count,
+    delivery.sent_count,
+    delivery.successful_count,
+    delivery.tokens_sent,
+    typeof delivery.success === "number" ? delivery.success : null,
+    inner.success_count,
+    inner.delivered_count,
+    inner.sent_count,
+    root.success_count
+  );
+
+  let failureCount = pickNumber(
+    delivery.failure_count,
+    delivery.failed_count,
+    delivery.failure,
+    delivery.failed,
+    inner.failure_count,
+    inner.failed_count,
+    root.failure_count
+  );
+
+  if (totalDevices !== null && successCount !== null && failureCount === null) {
+    failureCount = Math.max(0, totalDevices - successCount);
+  } else if (
+    totalDevices === null &&
+    successCount !== null &&
+    failureCount !== null
+  ) {
+    totalDevices = successCount + failureCount;
+  }
+
+  let successRate = pickNumber(
+    delivery.success_rate,
+    inner.success_rate,
+    root.success_rate
+  );
+  if (
+    successRate === null &&
+    totalDevices !== null &&
+    totalDevices > 0 &&
+    successCount !== null
+  ) {
+    successRate = Number(((successCount / totalDevices) * 100).toFixed(1));
+  }
+
+  const inactiveRemoved = pickNumber(
+    maintenance.inactive_tokens_removed,
+    inner.inactive_tokens_removed
+  );
+  const invalidCleaned = pickNumber(
+    maintenance.invalid_tokens_cleaned,
+    inner.invalid_tokens_cleaned
+  );
+
+  const notificationId =
+    metadata.notification_id ||
+    inner.notification_id ||
+    root.notification_id ||
+    null;
+
+  const timestamp =
+    metadata.timestamp ||
+    inner.timestamp ||
+    root.timestamp ||
+    new Date().toISOString();
+
+  const serverMessage =
+    root.message ||
+    inner.message ||
+    delivery.message ||
+    "Push notification dispatched to Cookeaze mobile devices.";
+
+  return {
+    state: meta.state || "completed",
+    channel: meta.channel || "broadcast",
+    title: meta.title || "",
+    body: meta.body || "",
+    serverMessage,
+    totalDevices,
+    successCount,
+    failureCount,
+    successRate,
+    inactiveRemoved,
+    invalidCleaned,
+    notificationId,
+    timestamp,
+    hasDeviceBreakdown:
+      totalDevices !== null || successCount !== null || failureCount !== null,
+  };
+}
+
+export default function NotificationAdmin() {
+  const { token } = useAuth() || {};
+  const [activeTab, setActiveTab] = useState("broadcast"); // "broadcast" | "meal" | "recipe"
+  const [previewPlatform, setPreviewPlatform] = useState("ios"); // "ios" | "android"
+  const [showAdvancedJson, setShowAdvancedJson] = useState(false);
+
   const [loading, setLoading] = useState(false);
+  const [uploadingImage, setUploadingImage] = useState(false);
 
+  // Recipe Modal & Recipes State
   const [showRecipeModal, setShowRecipeModal] = useState(false);
-  const [recipes, setRecipes] = useState([]);
+  const [recipes, setRecipes] = useState(() => getCachedRecipes().slice(0, 20));
+  const [recipesCount, setRecipesCount] = useState(
+    () => getCachedRecipes().length
+  );
+  const [recipePage, setRecipePage] = useState(1);
   const [recipeSearch, setRecipeSearch] = useState("");
   const [loadingRecipes, setLoadingRecipes] = useState(false);
 
+  // Telemetry & Feedback
   const [deliveryStats, setDeliveryStats] = useState(null);
   const [notification, setNotification] = useState({ type: "", message: "" });
+  const [recentHistory, setRecentHistory] = useState(() => loadRecentHistory());
 
-  // Ref for search input to maintain focus
-  const searchInputRef = useRef(null);
+  const broadcastImageInputRef = useRef(null);
 
-  // Forms
+  // Forms State
   const [broadcastForm, setBroadcastForm] = useState({
     title: "",
     body: "",
     image_url: "",
-    custom_data: {},
   });
+  const [broadcastJsonText, setBroadcastJsonText] = useState("{}");
 
   const [mealForm, setMealForm] = useState({
     meal_type: "dinner",
     title: "",
     body: "",
-    custom_data: {},
   });
+  const [mealJsonText, setMealJsonText] = useState("{}");
 
   const [recipeForm, setRecipeForm] = useState({
     recipe_id: null,
@@ -59,232 +332,356 @@ const NotificationAdmin = () => {
     body: "",
     recipe_image_url: "",
     meal_type: "dinner",
-    custom_data: {},
   });
+  const [recipeJsonText, setRecipeJsonText] = useState("{}");
 
-  // ----------------------------------------------------------
-  // SHOW MESSAGE
-  // ----------------------------------------------------------
-  const showNotification = (type, message) => {
+  const showNotification = useCallback((type, message) => {
     setNotification({ type, message });
-    setTimeout(() => {
+  }, []);
+
+  useEffect(() => {
+    if (!notification.message) return undefined;
+    const timer = setTimeout(() => {
       setNotification({ type: "", message: "" });
-    }, 3500);
-  };
+    }, 5000);
+    return () => clearTimeout(timer);
+  }, [notification.message]);
 
-  // helper to build auth headers and handle missing token
-  const getAuthHeaders = () => {
-    if (!token) return null; // caller should handle null (not authenticated)
-    return {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    };
-  };
+  const postWithAuth = useCallback(
+    async (path, payload) => {
+      let authToken = token || localStorage.getItem("token");
+      if (!authToken) {
+        authToken = await ensureValidToken();
+      }
+      if (!authToken) {
+        throw new Error("You are not authenticated. Please log in.");
+      }
 
-  // helper to parse different response shapes for recipes
-  const extractRecipes = (data) => {
-    if (!data) return [];
-    if (Array.isArray(data)) return data;
-    if (Array.isArray(data.results)) return data.results;
-    if (Array.isArray(data.data?.results)) return data.data.results;
-    if (Array.isArray(data.data)) return data.data;
-    // fallback: maybe the API returned single object or other structure
-    return [];
-  };
+      const executePost = async (bearer) =>
+        fetch(`${API_BASE}${path}`, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${bearer}`,
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify(payload),
+        });
 
-  // ----------------------------------------------------------
-  // FETCH RECIPES - Only called explicitly
-  // ----------------------------------------------------------
-  const fetchRecipes = async (searchQuery = "") => {
+      let res = await executePost(authToken);
+
+      if (res.status === 401) {
+        const refreshed = await ensureValidToken();
+        if (refreshed && refreshed !== authToken) {
+          res = await executePost(refreshed);
+        }
+      }
+
+      const data = await res.json().catch(() => ({}));
+      return { ok: res.ok, status: res.status, data };
+    },
+    [token]
+  );
+
+  const fetchRecipes = useCallback(async (page = 1, searchQuery = "") => {
+    const q = searchQuery.trim().toLowerCase();
     setLoadingRecipes(true);
 
-    // ensure we have a token
-    const headers = getAuthHeaders();
-    if (!headers) {
-      setLoadingRecipes(false);
-      showNotification("error", "You are not authenticated. Please log in.");
-      return;
-    }
-
     try {
-      const url = searchQuery
-        ? `${API_BASE}/recipes/?search=${encodeURIComponent(searchQuery)}`
-        : `${API_BASE}/recipes/`;
+      const cached = getCachedRecipes();
+      if (cached.length > 0) {
+        const filtered = q
+          ? cached.filter((r) => {
+              const matchName = String(r.name || "")
+                .toLowerCase()
+                .includes(q);
+              const matchCat = Array.isArray(r.category)
+                ? r.category.some((c) => String(c).toLowerCase().includes(q))
+                : false;
+              return matchName || matchCat;
+            })
+          : cached;
 
-      const res = await fetch(url, {
-        headers,
-      });
-
-      // if non-2xx, try to show a helpful error
-      if (!res.ok) {
-        const text = await res.text().catch(() => "");
-        console.error("Fetch recipes failed", res.status, text);
-        showNotification(
-          "error",
-          `Failed to fetch recipes (status ${res.status})`
-        );
-        setRecipes([]);
-        return;
+        if (filtered.length > 0 || !q) {
+          const start = (page - 1) * 20;
+          setRecipes(filtered.slice(start, start + 20));
+          setRecipesCount(filtered.length);
+          setLoadingRecipes(false);
+          return;
+        }
       }
 
-      const data = await res.json();
-
-      // extract recipes from possible shapes
-      const extracted = extractRecipes(data);
-
-      if (extracted.length > 0) {
-        setRecipes(extracted);
-      } else {
-        // no recipes found — but still set to empty array so UI shows empty state
-        setRecipes([]);
-        // optionally notify the user only if search was used
-        // showNotification("error", searchQuery ? "No recipes found." : "No recipes available.");
+      let url = `${API_BASE}/recipes/?page=${page}`;
+      if (searchQuery.trim()) {
+        url += `&search=${encodeURIComponent(searchQuery.trim())}`;
       }
+      const res = await axiosInstance.get(url);
+      const { results, count } = extractRecipesPayload(res.data);
+
+      const seen = new Set();
+      const unique = [];
+      for (let i = 0; i < results.length; i += 1) {
+        const r = results[i];
+        if (r && r.id && !seen.has(String(r.id))) {
+          seen.add(String(r.id));
+          unique.push(r);
+        }
+      }
+
+      setRecipes(unique);
+      setRecipesCount(count || unique.length);
     } catch (err) {
       console.error("fetchRecipes error:", err);
-      showNotification("error", "Network error while fetching recipes");
-      setRecipes([]);
+      const cached = getCachedRecipes();
+      if (cached.length > 0) {
+        const start = (page - 1) * 20;
+        setRecipes(cached.slice(start, start + 20));
+        setRecipesCount(cached.length);
+      } else {
+        setRecipes([]);
+      }
     } finally {
       setLoadingRecipes(false);
-      if (searchInputRef.current) {
-        searchInputRef.current.focus();
-      }
     }
-  };
+  }, []);
 
-  // Fetch recipes only ONCE when modal opens
   useEffect(() => {
-    if (showRecipeModal) {
-      setRecipeSearch(""); // Clear search input
-      fetchRecipes(""); // Load all recipes initially
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showRecipeModal]);
+    if (!showRecipeModal) return undefined;
+    const timer = setTimeout(() => {
+      fetchRecipes(recipePage, recipeSearch);
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [showRecipeModal, recipePage, recipeSearch, fetchRecipes]);
 
-  // ----------------------------------------------------------
-  // HANDLE SEARCH - Triggered by Enter key or search icon click
-  // ----------------------------------------------------------
-  const handleSearch = () => {
-    fetchRecipes(recipeSearch);
-  };
-
-  // ----------------------------------------------------------
-  // SELECT RECIPE
-  // ----------------------------------------------------------
   const selectRecipe = (recipe) => {
-    setRecipeForm({
-      ...recipeForm,
+    const cleanName = recipe.name || "Featured Recipe";
+    setRecipeForm((prev) => ({
+      ...prev,
       recipe_id: recipe.id,
-      recipe_name: recipe.name,
-      recipe_image_url: recipe.image_url,
-    });
+      recipe_name: cleanName,
+      recipe_image_url: recipe.image_url || "",
+      title: `Try ${cleanName} Tonight!`,
+      body: recipe.description
+        ? String(recipe.description).slice(0, 140)
+        : `Cook ${cleanName} in ${recipe.total_time || 30} mins with Cookeaze.`,
+    }));
     setShowRecipeModal(false);
   };
 
-  // ----------------------------------------------------------
-  // SUBMIT helpers: updated to use token from context
-  // ----------------------------------------------------------
-  const postWithAuth = async (path, payload) => {
-    const headers = getAuthHeaders();
-    if (!headers) {
-      throw new Error("Not authenticated");
+  const handleBroadcastImageUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploadingImage(true);
+    try {
+      const uploadedUrl = await CloudinaryService.uploadFile(file, {
+        folder: "cookeaze_notifications",
+      });
+      setBroadcastForm((prev) => ({ ...prev, image_url: uploadedUrl }));
+      showNotification("success", "Image uploaded.");
+    } catch {
+      showNotification("error", "Failed to upload image.");
+    } finally {
+      setUploadingImage(false);
+      e.target.value = "";
     }
+  };
 
-    const res = await fetch(`${API_BASE}${path}`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(payload),
+  const recordDispatch = (id, channel, payload, normalizedReport) => {
+    const entry = {
+      id: id || String(Date.now()),
+      channel,
+      title: payload.title,
+      body: payload.body,
+      image_url: payload.image_url || payload.recipe_image_url || "",
+      meal_type: payload.meal_type || null,
+      recipe_id: payload.recipe_id || null,
+      recipe_name: payload.recipe_name || null,
+      sentAt: new Date().toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      total: normalizedReport?.totalDevices ?? null,
+      success: normalizedReport?.successCount ?? null,
+      status: normalizedReport?.state || "completed",
+    };
+    setRecentHistory((prev) => {
+      const filtered = prev.filter((item) => item.id !== entry.id);
+      const next = [entry, ...filtered].slice(0, 8);
+      saveRecentHistory(next);
+      return next;
     });
-
-    const data = await res.json().catch(() => ({}));
-    return { ok: res.ok, status: res.status, data };
   };
 
-  const handleBroadcastSubmit = async (e) => {
-    e.preventDefault();
+  const dispatchNotification = async ({
+    channel,
+    endpoint,
+    payload,
+    successLabel,
+    onResetForm,
+  }) => {
+    const dispatchId = String(Date.now());
     setLoading(true);
-    setDeliveryStats(null);
 
-    try {
-      const { ok, data } = await postWithAuth(
-        "/notifications/broadcast/",
-        broadcastForm
-      );
-
-      if (ok && (data.success || data.isSuccessful)) {
-        showNotification("success", "Broadcast notification sent!");
-        setDeliveryStats(data.data || data);
-        setBroadcastForm({
-          title: "",
-          body: "",
-          image_url: "",
-          custom_data: {},
-        });
-      } else {
-        console.error("broadcast error", data);
-        showNotification("error", data.message || "Failed to send broadcast");
+    const initialReport = normalizeDeliveryReport(
+      {
+        message:
+          "Push notification handed off to FCM/APNs. Waiting for server delivery summary...",
+      },
+      {
+        state: "sending",
+        channel,
+        title: payload.title,
+        body: payload.body,
       }
-    } catch (err) {
-      console.error(err);
-      showNotification("error", "Network error");
-    }
+    );
+    setDeliveryStats(initialReport);
+    recordDispatch(dispatchId, channel, payload, initialReport);
 
-    setLoading(false);
-  };
-
-  const handleMealSubmit = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    setDeliveryStats(null);
+    let unlockedEarly = false;
+    const earlyUnlockTimer = setTimeout(() => {
+      unlockedEarly = true;
+      setLoading(false);
+      onResetForm();
+      showNotification(
+        "success",
+        `${successLabel} dispatched! Finalizing device delivery report.`
+      );
+    }, 1800);
 
     try {
-      const { ok, data } = await postWithAuth("/notifications/meal/", mealForm);
+      const { ok, data } = await postWithAuth(endpoint, payload);
+      clearTimeout(earlyUnlockTimer);
 
-      if (ok && (data.success || data.isSuccessful)) {
-        showNotification("success", "Meal notification sent!");
-        setDeliveryStats(data.data || data);
-        setMealForm({
-          meal_type: "dinner",
-          title: "",
-          body: "",
-          custom_data: {},
+      const isSuccess =
+        ok &&
+        (data.success !== false &&
+          (data.success ||
+            data.isSuccessful ||
+            data.status === "success" ||
+            ok));
+
+      if (isSuccess) {
+        const finalReport = normalizeDeliveryReport(data, {
+          state: "completed",
+          channel,
+          title: payload.title,
+          body: payload.body,
         });
+        setDeliveryStats(finalReport);
+        recordDispatch(dispatchId, channel, payload, finalReport);
+
+        if (!unlockedEarly) {
+          onResetForm();
+          showNotification("success", `${successLabel} sent!`);
+        }
       } else {
-        console.error("meal error", data);
+        setDeliveryStats(null);
         showNotification(
           "error",
-          data.message || "Failed to send meal notification"
+          data?.message || data?.detail || `Failed to send ${channel} notification.`
         );
       }
     } catch (err) {
-      console.error(err);
-      showNotification("error", "Network error");
+      clearTimeout(earlyUnlockTimer);
+      setDeliveryStats(null);
+      showNotification(
+        "error",
+        err?.message || `Network error while sending ${channel} notification.`
+      );
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
-  const handleRecipeSubmit = async (e) => {
+  // 1. Broadcast Submit
+  const handleBroadcastSubmit = async (e) => {
     e.preventDefault();
-
-    if (!recipeForm.recipe_id) {
-      showNotification("error", "Please select a recipe");
+    if (loading) return;
+    const parsedJson = parseJsonDraft(broadcastJsonText);
+    if (!parsedJson.ok) {
+      showNotification("error", parsedJson.error);
       return;
     }
 
-    setLoading(true);
-    setDeliveryStats(null);
+    const payload = {
+      title: broadcastForm.title.trim(),
+      body: broadcastForm.body.trim(),
+      image_url: broadcastForm.image_url.trim(),
+      custom_data: parsedJson.value,
+    };
 
-    try {
-      const { ok, data } = await postWithAuth(
-        "/notifications/recipe/",
-        recipeForm
-      );
+    await dispatchNotification({
+      channel: "broadcast",
+      endpoint: "/notifications/broadcast/",
+      payload,
+      successLabel: "Broadcast notification",
+      onResetForm: () => {
+        setBroadcastForm({ title: "", body: "", image_url: "" });
+        setBroadcastJsonText("{}");
+      },
+    });
+  };
 
-      if (ok && (data.success || data.isSuccessful)) {
-        showNotification("success", "Recipe notification sent!");
-        setDeliveryStats(data.data || data);
+  // 2. Meal Reminder Submit
+  const handleMealSubmit = async (e) => {
+    e.preventDefault();
+    if (loading) return;
+    const parsedJson = parseJsonDraft(mealJsonText);
+    if (!parsedJson.ok) {
+      showNotification("error", parsedJson.error);
+      return;
+    }
 
+    const payload = {
+      meal_type: mealForm.meal_type,
+      title: mealForm.title.trim(),
+      body: mealForm.body.trim(),
+      custom_data: parsedJson.value,
+    };
+
+    await dispatchNotification({
+      channel: "meal",
+      endpoint: "/notifications/meal/",
+      payload,
+      successLabel: "Meal reminder notification",
+      onResetForm: () => {
+        setMealForm({ meal_type: "dinner", title: "", body: "" });
+        setMealJsonText("{}");
+      },
+    });
+  };
+
+  // 3. Recipe Feature Submit
+  const handleRecipeSubmit = async (e) => {
+    e.preventDefault();
+    if (loading) return;
+    if (!recipeForm.recipe_id) {
+      showNotification("error", "Please select a recipe to feature first.");
+      return;
+    }
+
+    const parsedJson = parseJsonDraft(recipeJsonText);
+    if (!parsedJson.ok) {
+      showNotification("error", parsedJson.error);
+      return;
+    }
+
+    const payload = {
+      recipe_id: recipeForm.recipe_id,
+      recipe_name: recipeForm.recipe_name,
+      title: recipeForm.title.trim(),
+      body: recipeForm.body.trim(),
+      recipe_image_url: recipeForm.recipe_image_url,
+      meal_type: recipeForm.meal_type,
+      custom_data: parsedJson.value,
+    };
+
+    await dispatchNotification({
+      channel: "recipe",
+      endpoint: "/notifications/recipe/",
+      payload,
+      successLabel: "Recipe feature notification",
+      onResetForm: () => {
         setRecipeForm({
           recipe_id: null,
           recipe_name: "",
@@ -292,667 +689,1151 @@ const NotificationAdmin = () => {
           body: "",
           recipe_image_url: "",
           meal_type: "dinner",
-          custom_data: {},
         });
-      } else {
-        console.error("recipe notif error", data);
-        showNotification(
-          "error",
-          data.message || "Failed to send recipe notification"
-        );
-      }
-    } catch (err) {
-      console.error(err);
-      showNotification("error", "Network error");
-    }
-
-    setLoading(false);
-  };
-
-  // ----------------------------------------------------------
-  // DELIVERY STATS CARD
-  // ----------------------------------------------------------
-  const DeliveryStatsCard = ({ stats }) => {
-    if (!stats) return null;
-
-    // The API might return these fields inside an object (e.g., stats.delivery) or at the top level
-    const data = stats.delivery || stats;
-
-    const total = data.total_devices ?? data.total ?? 0;
-    const success = data.success_count ?? data.success ?? 0;
-    const failure = data.failure_count ?? data.failure ?? (total - success) ?? 0;
-    const rate = data.success_rate ?? (total > 0 ? ((success / total) * 100).toFixed(1) : 0);
-
-    const chartData = {
-      labels: ["Success", "Failed"],
-      datasets: [
-        {
-          data: [success, failure],
-          backgroundColor: ["#198754", "#dc3545"],
-          hoverBackgroundColor: ["#157347", "#bb2d3b"],
-          borderWidth: 0,
-        },
-      ],
-    };
-
-    const chartOptions = {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-        legend: {
-          position: "bottom",
-          labels: {
-            usePointStyle: true,
-            padding: 20,
-          },
-        },
-        tooltip: {
-          callbacks: {
-            label: (context) => {
-              const label = context.label || '';
-              const value = context.raw || 0;
-              const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
-              return `${label}: ${value} (${percentage}%)`;
-            }
-          }
-        }
+        setRecipeJsonText("{}");
       },
-    };
-
-    return (
-      <div className="card mt-4 border-0 shadow-sm" style={{ borderRadius: "16px", overflow: "hidden" }}>
-        <div className="card-header bg-white border-bottom-0 pt-4 pb-2 px-4 d-flex justify-content-between align-items-center">
-          <h5 className="mb-0 text-dark d-flex align-items-center fw-bold">
-            <Activity size={22} className="me-2 text-primary" />
-            Delivery Report Overview
-          </h5>
-          <button type="button" className="btn-close" aria-label="Close" onClick={() => setDeliveryStats(null)}></button>
-        </div>
-
-        <div className="card-body p-4 bg-white">
-          <div className="row g-4 align-items-center">
-            {/* Chart Section */}
-            <div className="col-12 col-md-5 col-lg-4 text-center">
-              <div style={{ height: "220px", width: "100%", position: "relative" }}>
-                {total > 0 ? (
-                  <Pie data={chartData} options={chartOptions} />
-                ) : (
-                  <div className="d-flex h-100 align-items-center justify-content-center text-muted flex-column">
-                    <AlertCircle size={40} className="mb-2 opacity-50" />
-                    <p className="mb-0">No data to display</p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Stats Section */}
-            <div className="col-12 col-md-7 col-lg-8">
-              <div className="row g-3">
-                {/* Total Devices */}
-                <div className="col-6 col-sm-6">
-                  <div className="p-3 rounded-4 h-100 shadow-sm" style={{ background: "linear-gradient(145deg, #f8f9fa, #e9ecef)", border: "1px solid #dee2e6" }}>
-                    <div className="text-muted fw-bold mb-1" style={{ fontSize: "0.75rem", letterSpacing: "1px", textTransform: "uppercase" }}>Total Devices</div>
-                    <h3 className="mb-0 fw-bold text-secondary">{total.toLocaleString()}</h3>
-                  </div>
-                </div>
-
-                {/* Success Rate */}
-                <div className="col-6 col-sm-6">
-                  <div className="p-3 rounded-4 h-100 shadow-sm" style={{ background: "linear-gradient(145deg, #cce5ff, #b8daff)", border: "1px solid #b8daff" }}>
-                    <div className="text-primary fw-bold mb-1" style={{ fontSize: "0.75rem", letterSpacing: "1px", textTransform: "uppercase" }}>Success Rate</div>
-                    <h3 className="mb-0 fw-bold text-primary">{rate}%</h3>
-                  </div>
-                </div>
-
-                {/* Success Count */}
-                <div className="col-6 col-sm-6">
-                  <div className="p-3 rounded-4 h-100 shadow-sm" style={{ background: "linear-gradient(145deg, #d4edda, #c3e6cb)", border: "1px solid #c3e6cb" }}>
-                    <div className="text-success fw-bold mb-1" style={{ fontSize: "0.75rem", letterSpacing: "1px", textTransform: "uppercase" }}>Delivered</div>
-                    <h3 className="mb-0 fw-bold text-success">{success.toLocaleString()}</h3>
-                  </div>
-                </div>
-
-                {/* Failure Count */}
-                <div className="col-6 col-sm-6">
-                  <div className="p-3 rounded-4 h-100 shadow-sm" style={{ background: "linear-gradient(145deg, #f8d7da, #f5c6cb)", border: "1px solid #f5c6cb" }}>
-                    <div className="text-danger fw-bold mb-1" style={{ fontSize: "0.75rem", letterSpacing: "1px", textTransform: "uppercase" }}>Failed</div>
-                    <h3 className="mb-0 fw-bold text-danger">{failure.toLocaleString()}</h3>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
+    });
   };
 
-  // ----------------------------------------------------------
-  // RECIPE MODAL
-  // ----------------------------------------------------------
-  const RecipeModal = () => {
-    if (!showRecipeModal) return null;
-
-    return (
-      <>
-        {/* Backdrop */}
-        <div
-          className="modal-backdrop fade show"
-          style={{
-            backgroundColor: "rgba(0,0,0,0.5)",
-            zIndex: 9998,
-          }}
-        />
-
-        {/* Modal */}
-        <div
-          className="modal d-block"
-          tabIndex="-1"
-          style={{
-            zIndex: 9999,
-          }}
-        >
-          <div className="modal-dialog modal-xl modal-dialog-scrollable">
-            <div className="modal-content">
-              <div className="modal-header bg-danger text-white">
-                <h5 className="modal-title d-flex align-items-center">
-                  <ChefHat className="me-2" /> Select Recipe
-                </h5>
-                <button
-                  className="btn-close btn-close-white"
-                  onClick={() => setShowRecipeModal(false)}
-                />
-              </div>
-
-              <div className="modal-body p-0">
-                {/* Search Bar */}
-                <div className="p-3 bg-light border-bottom">
-                  <div className="input-group">
-                    <input
-                      ref={searchInputRef}
-                      className="form-control"
-                      placeholder="Type and press Enter or click search"
-                      value={recipeSearch}
-                      onChange={(e) => setRecipeSearch(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") {
-                          e.preventDefault();
-                          handleSearch();
-                        }
-                      }}
-                      autoComplete="off"
-                      autoFocus
-                    />
-                    <button
-                      className="btn btn-danger"
-                      type="button"
-                      onClick={handleSearch}
-                      disabled={loadingRecipes}
-                    >
-                      <Search size={20} />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Recipe List */}
-                <div
-                  style={{ maxHeight: "60vh", overflowY: "auto" }}
-                  className="p-3"
-                >
-                  {loadingRecipes ? (
-                    <div className="text-center py-5">
-                      <div className="spinner-border text-danger"></div>
-                      <p className="mt-2 text-muted">Loading recipes...</p>
-                    </div>
-                  ) : recipes.length === 0 ? (
-                    <div className="text-center py-5">
-                      <AlertCircle size={48} className="text-muted mb-3" />
-                      <p className="text-muted">
-                        {recipeSearch
-                          ? "No recipes found. Try a different search."
-                          : "No recipes available."}
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="list-group">
-                      {recipes.map((recipe) => (
-                        <button
-                          key={recipe.id}
-                          className="list-group-item list-group-item-action d-flex gap-3 align-items-center"
-                          onClick={() => selectRecipe(recipe)}
-                          style={{
-                            cursor: "pointer",
-                            borderRadius: "8px",
-                            padding: "10px",
-                            marginBottom: "8px",
-                          }}
-                        >
-                          <img
-                            src={recipe.image_url}
-                            alt={recipe.name}
-                            style={{
-                              width: 70,
-                              height: 70,
-                              objectFit: "cover",
-                              borderRadius: "6px",
-                            }}
-                          />
-
-                          <div className="flex-grow-1 text-start">
-                            <div className="fw-semibold">{recipe.name}</div>
-
-                            <div className="d-flex gap-2 mt-1">
-                              <span className="badge bg-warning text-dark">
-                                ⭐ {recipe.rating}
-                              </span>
-                              <span className="badge bg-secondary">
-                                ⏱ {recipe.total_time}m
-                              </span>
-                              <span className="badge bg-info">
-                                🍽 {recipe.servings}
-                              </span>
-                            </div>
-
-                            <small className="text-muted d-block mt-1">
-                              {recipe.description?.slice(0, 60)}...
-                            </small>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </>
-    );
+  const handleResetActiveForm = () => {
+    if (activeTab === "broadcast") {
+      setBroadcastForm({ title: "", body: "", image_url: "" });
+      setBroadcastJsonText("{}");
+    } else if (activeTab === "meal") {
+      setMealForm({ meal_type: "dinner", title: "", body: "" });
+      setMealJsonText("{}");
+    } else {
+      setRecipeForm({
+        recipe_id: null,
+        recipe_name: "",
+        title: "",
+        body: "",
+        recipe_image_url: "",
+        meal_type: "dinner",
+      });
+      setRecipeJsonText("{}");
+    }
   };
 
-  // ----------------------------------------------------------
-  // MAIN RENDER
-  // ----------------------------------------------------------
+  const handleReuseHistoryItem = (item) => {
+    setActiveTab(item.channel);
+    if (item.channel === "broadcast") {
+      setBroadcastForm({
+        title: item.title || "",
+        body: item.body || "",
+        image_url: item.image_url || "",
+      });
+    } else if (item.channel === "meal") {
+      setMealForm({
+        meal_type: item.meal_type || "dinner",
+        title: item.title || "",
+        body: item.body || "",
+      });
+    } else if (item.channel === "recipe") {
+      setRecipeForm((prev) => ({
+        ...prev,
+        recipe_id: item.recipe_id || prev.recipe_id,
+        recipe_name: item.recipe_name || prev.recipe_name,
+        recipe_image_url: item.image_url || prev.recipe_image_url,
+        meal_type: item.meal_type || "dinner",
+        title: item.title || "",
+        body: item.body || "",
+      }));
+    }
+  };
+
+  // Active Preview Values
+  const activePreview =
+    activeTab === "broadcast"
+      ? {
+          title: broadcastForm.title.trim() || "Notification Title",
+          body:
+            broadcastForm.body.trim() ||
+            "Your notification message will appear here as you type.",
+          image: broadcastForm.image_url.trim(),
+        }
+      : activeTab === "meal"
+      ? {
+          title:
+            mealForm.title.trim() ||
+            MEAL_PRESETS[mealForm.meal_type]?.title ||
+            "What's Cooking Tonight?",
+          body:
+            mealForm.body.trim() ||
+            "Your meal reminder message will appear here.",
+          image: "",
+        }
+      : {
+          title:
+            recipeForm.title.trim() ||
+            (recipeForm.recipe_name
+              ? `Try ${recipeForm.recipe_name} Tonight!`
+              : "Featured Recipe"),
+          body:
+            recipeForm.body.trim() ||
+            "Tap to view full ingredients and step-by-step cooking instructions.",
+          image: recipeForm.recipe_image_url,
+        };
+
+  const activeJsonCheck = parseJsonDraft(
+    activeTab === "broadcast"
+      ? broadcastJsonText
+      : activeTab === "meal"
+      ? mealJsonText
+      : recipeJsonText
+  );
+
+  const totalRecipePages = Math.max(1, Math.ceil(recipesCount / 20));
+
   return (
-    <>
-      <style>{`
-        .recipe-card-hover {
-          cursor: pointer;
-          transition: .2s;
-        }
-        .recipe-card-hover:hover {
-          transform: scale(1.02);
-          box-shadow: 0 3px 8px rgba(0,0,0,.2);
-        }
-      `}</style>
+    <div className="ntf-page">
+      <input
+        ref={broadcastImageInputRef}
+        type="file"
+        accept="image/*"
+        style={{ display: "none" }}
+        onChange={handleBroadcastImageUpload}
+      />
 
-      <RecipeModal />
+      {/* ── Page Header ── */}
+      <header className="ntf-header">
+        <div>
+          <h1 className="ntf-title">Push Notifications</h1>
+          <p className="ntf-subtitle">
+            Compose, preview, and send push notifications to Cookeaze mobile users.
+          </p>
+        </div>
 
-      <div className="bg-light min-vh-100 py-4">
-        <div className="container">
-          {/* Header */}
-          <div className="mb-4">
-            <h1 className="display-5 fw-bold d-flex align-items-center gap-3">
-              <Bell className="text-danger" size={40} />
-              CookEaze Notification Admin
-            </h1>
-            <p className="text-muted">Manage and send push notifications</p>
+        <button
+          type="button"
+          className="ntf-btn"
+          onClick={handleResetActiveForm}
+        >
+          <RotateCcw size={14} />
+          Reset
+        </button>
+      </header>
+
+      {/* ── Toast Notification ── */}
+      {notification.message && (
+        <div
+          role="alert"
+          aria-live="polite"
+          className={`ntf-toast ${
+            notification.type === "success"
+              ? "ntf-toast-success"
+              : "ntf-toast-error"
+          }`}
+        >
+          <div className="ntf-toast-left">
+            {notification.type === "success" ? (
+              <CheckCircle2 size={16} />
+            ) : (
+              <AlertCircle size={16} />
+            )}
+            <span>{notification.message}</span>
+          </div>
+          <button
+            type="button"
+            className="ntf-toast-close"
+            onClick={() => setNotification({ type: "", message: "" })}
+          >
+            <X size={15} />
+          </button>
+        </div>
+      )}
+
+      {/* ── 2-Column Workspace: Clean Composer + Live Mobile Preview ── */}
+      <div className="ntf-workspace">
+        {/* LEFT COLUMN: Clean Notification Composer */}
+        <section className="ntf-card">
+          <div className="ntf-card-header">
+            <h2 className="ntf-card-title">Compose Notification</h2>
           </div>
 
-          {/* Alert */}
-          {notification.message && (
-            <div
-              className={`alert alert-${
-                notification.type === "success" ? "success" : "danger"
-              } d-flex align-items-center`}
-            >
-              {notification.type === "success" ? (
-                <CheckCircle className="me-2" />
-              ) : (
-                <AlertCircle className="me-2" />
-              )}
-              {notification.message}
-            </div>
-          )}
-
-          {/* Tabs */}
-          <ul className="nav nav-tabs mb-4">
-            <li className="nav-item">
+          <div className="ntf-card-body">
+            {/* Clean 3-Segment Channel Switcher */}
+            <div className="ntf-channel-tabs" role="tablist">
               <button
-                className={`nav-link ${
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "broadcast"}
+                className={`ntf-channel-tab ${
                   activeTab === "broadcast" ? "active" : ""
                 }`}
                 onClick={() => setActiveTab("broadcast")}
               >
-                <Send size={18} className="me-2" />
                 Broadcast
               </button>
-            </li>
 
-            <li className="nav-item">
               <button
-                className={`nav-link ${activeTab === "meal" ? "active" : ""}`}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "meal"}
+                className={`ntf-channel-tab ${
+                  activeTab === "meal" ? "active" : ""
+                }`}
                 onClick={() => setActiveTab("meal")}
               >
-                <UtensilsCrossed size={18} className="me-2" />
                 Meal Reminder
               </button>
-            </li>
 
-            <li className="nav-item">
               <button
-                className={`nav-link ${activeTab === "recipe" ? "active" : ""}`}
+                type="button"
+                role="tab"
+                aria-selected={activeTab === "recipe"}
+                className={`ntf-channel-tab ${
+                  activeTab === "recipe" ? "active" : ""
+                }`}
                 onClick={() => setActiveTab("recipe")}
               >
-                <ChefHat size={18} className="me-2" />
                 Recipe Feature
               </button>
-            </li>
-          </ul>
+            </div>
 
-          {/* FORMS CARD */}
-          <div className="card shadow">
-            <div className="card-body p-4">
-              {/* BROADCAST */}
-              {activeTab === "broadcast" && (
-                <form onSubmit={handleBroadcastSubmit}>
-                  <h4 className="mb-4">Broadcast Notification</h4>
-
-                  {/* Title */}
-                  <div className="mb-3">
-                    <label className="form-label fw-semibold">Title</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      required
-                      value={broadcastForm.title}
-                      onChange={(e) =>
-                        setBroadcastForm({
-                          ...broadcastForm,
-                          title: e.target.value,
-                        })
-                      }
-                      placeholder="🎉 Weekend Sale!"
-                    />
-                  </div>
-
-                  {/* Body */}
-                  <div className="mb-3">
-                    <label className="form-label fw-semibold">Body</label>
-                    <textarea
-                      className="form-control"
-                      required
-                      rows="3"
-                      value={broadcastForm.body}
-                      onChange={(e) =>
-                        setBroadcastForm({
-                          ...broadcastForm,
-                          body: e.target.value,
-                        })
-                      }
-                      placeholder="Get 20% off premium recipes this weekend only!"
-                    />
-                  </div>
-
-                  {/* Image */}
-                  <div className="mb-3">
-                    <label className="form-label fw-semibold">
-                      Image URL (optional)
-                    </label>
-                    <input
-                      type="url"
-                      className="form-control"
-                      value={broadcastForm.image_url}
-                      onChange={(e) =>
-                        setBroadcastForm({
-                          ...broadcastForm,
-                          image_url: e.target.value,
-                        })
-                      }
-                      placeholder="https://example.com/image.jpg"
-                    />
-                  </div>
-
-                  {/* JSON */}
-                  <div className="mb-3">
-                    <label className="form-label fw-semibold">
-                      Custom Data (JSON)
-                    </label>
-                    <textarea
-                      className="form-control font-monospace"
-                      rows="3"
-                      value={JSON.stringify(broadcastForm.custom_data, null, 2)}
-                      onChange={(e) => {
-                        try {
-                          setBroadcastForm({
-                            ...broadcastForm,
-                            custom_data: JSON.parse(e.target.value),
-                          });
-                        } catch {}
-                      }}
-                      placeholder='{"key": "value"}'
-                    />
-                  </div>
-
-                  {/* Submit */}
-                  <button className="btn btn-danger w-100" disabled={loading}>
-                    {loading ? "Sending..." : "Send Broadcast"}
-                  </button>
-
-                  <DeliveryStatsCard stats={deliveryStats} />
-                </form>
-              )}
-
-              {/* MEAL TAB */}
-              {activeTab === "meal" && (
-                <form onSubmit={handleMealSubmit}>
-                  <h4 className="mb-4">Meal Notification</h4>
-
-                  <div className="mb-3">
-                    <label className="form-label fw-semibold">Meal Type</label>
-                    <select
-                      className="form-select"
-                      value={mealForm.meal_type}
-                      onChange={(e) =>
-                        setMealForm({ ...mealForm, meal_type: e.target.value })
+            {/* ── TAB 1: BROADCAST FORM ── */}
+            {activeTab === "broadcast" && (
+              <form onSubmit={handleBroadcastSubmit} className="ntf-form-stack">
+                <div className="ntf-template-row">
+                  <span className="ntf-template-label">Templates:</span>
+                  {BROADCAST_PRESETS.map((preset) => (
+                    <button
+                      key={preset.label}
+                      type="button"
+                      className="ntf-template-chip"
+                      onClick={() =>
+                        setBroadcastForm((prev) => ({
+                          ...prev,
+                          title: preset.title,
+                          body: preset.body,
+                        }))
                       }
                     >
-                      <option value="breakfast">breakfast</option>
-                      <option value="lunch">lunch</option>
-                      <option value="dinner">dinner</option>
-                    </select>
-                  </div>
+                      {preset.label}
+                    </button>
+                  ))}
+                </div>
 
-                  <div className="mb-3">
-                    <label className="form-label fw-semibold">Title</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      required
-                      value={mealForm.title}
-                      onChange={(e) =>
-                        setMealForm({ ...mealForm, title: e.target.value })
-                      }
-                      placeholder="What's for Dinner? 🍽️"
-                    />
-                  </div>
-
-                  <div className="mb-3">
-                    <label className="form-label fw-semibold">Body</label>
-                    <textarea
-                      className="form-control"
-                      rows="3"
-                      required
-                      value={mealForm.body}
-                      onChange={(e) =>
-                        setMealForm({ ...mealForm, body: e.target.value })
-                      }
-                      placeholder="Let's find a delicious recipe to end the day!"
-                    />
-                  </div>
-
-                  <div className="mb-3">
-                    <label className="form-label fw-semibold">
-                      Custom Data (JSON)
+                <div className="ntf-field">
+                  <div className="ntf-label-row">
+                    <label htmlFor="broadcast-title" className="ntf-label">
+                      Title<span className="ntf-req">*</span>
                     </label>
-                    <textarea
-                      className="form-control font-monospace"
-                      rows="3"
-                      value={JSON.stringify(mealForm.custom_data, null, 2)}
-                      onChange={(e) => {
-                        try {
-                          setMealForm({
-                            ...mealForm,
-                            custom_data: JSON.parse(e.target.value),
-                          });
-                        } catch {}
-                      }}
-                      placeholder='{"campaign": "evening_reminder"}'
-                    />
+                    <span
+                      className={`ntf-counter ${
+                        broadcastForm.title.length > 65 ? "over" : ""
+                      }`}
+                    >
+                      {broadcastForm.title.length} / 65
+                    </span>
                   </div>
+                  <input
+                    id="broadcast-title"
+                    type="text"
+                    className="ntf-input"
+                    required
+                    value={broadcastForm.title}
+                    onChange={(e) =>
+                      setBroadcastForm({
+                        ...broadcastForm,
+                        title: e.target.value,
+                      })
+                    }
+                    placeholder="e.g. Fresh Weekend Recipes Are Here!"
+                  />
+                </div>
 
-                  <button className="btn btn-danger w-100" disabled={loading}>
-                    {loading ? "Sending..." : "Send Meal Reminder"}
-                  </button>
-
-                  <DeliveryStatsCard stats={deliveryStats} />
-                </form>
-              )}
-
-              {/* RECIPE TAB */}
-              {activeTab === "recipe" && (
-                <form onSubmit={handleRecipeSubmit}>
-                  <h4 className="mb-4">Recipe Feature Notification</h4>
-
-                  {/* Selected Recipe */}
-                  <div className="mb-3">
-                    <label className="form-label fw-semibold">
-                      Selected Recipe
+                <div className="ntf-field">
+                  <div className="ntf-label-row">
+                    <label htmlFor="broadcast-body" className="ntf-label">
+                      Message<span className="ntf-req">*</span>
                     </label>
-                    <div className="d-flex gap-2">
-                      {recipeForm.recipe_id ? (
-                        <div className="border p-3 bg-light rounded flex-grow-1">
-                          <div className="d-flex gap-3 align-items-center">
-                            <img
-                              src={recipeForm.recipe_image_url}
-                              alt={recipeForm.recipe_name}
-                              style={{
-                                width: 80,
-                                height: 80,
-                                objectFit: "cover",
-                              }}
-                              className="rounded"
-                            />
-                            <div>
-                              <div className="fw-semibold">
-                                {recipeForm.recipe_name}
-                              </div>
-                              <small className="text-muted">
-                                ID: {recipeForm.recipe_id}
-                              </small>
-                            </div>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="border p-3 bg-light rounded flex-grow-1 text-muted text-center">
-                          No recipe selected
-                        </div>
+                    <span
+                      className={`ntf-counter ${
+                        broadcastForm.body.length > 180 ? "over" : ""
+                      }`}
+                    >
+                      {broadcastForm.body.length} / 180
+                    </span>
+                  </div>
+                  <textarea
+                    id="broadcast-body"
+                    className="ntf-textarea"
+                    rows={3}
+                    required
+                    value={broadcastForm.body}
+                    onChange={(e) =>
+                      setBroadcastForm({
+                        ...broadcastForm,
+                        body: e.target.value,
+                      })
+                    }
+                    placeholder="Write a clear message for Cookeaze users..."
+                  />
+                </div>
+
+                <div className="ntf-field">
+                  <div className="ntf-label-row">
+                    <label htmlFor="broadcast-image" className="ntf-label">
+                      Image (Optional)
+                    </label>
+                    <div style={{ display: "flex", gap: "6px" }}>
+                      {broadcastForm.image_url && (
+                        <button
+                          type="button"
+                          className="ntf-btn ntf-btn-sm"
+                          onClick={() =>
+                            setBroadcastForm((prev) => ({
+                              ...prev,
+                              image_url: "",
+                            }))
+                          }
+                        >
+                          Remove
+                        </button>
                       )}
-
                       <button
                         type="button"
-                        className="btn btn-danger"
-                        onClick={() => setShowRecipeModal(true)}
+                        className="ntf-btn ntf-btn-sm"
+                        onClick={() => broadcastImageInputRef.current?.click()}
+                        disabled={uploadingImage}
                       >
-                        Select Recipe
+                        <Upload size={12} />
+                        {uploadingImage ? "Uploading..." : "Upload Image"}
                       </button>
                     </div>
                   </div>
+                  <input
+                    id="broadcast-image"
+                    type="url"
+                    className="ntf-input"
+                    value={broadcastForm.image_url}
+                    onChange={(e) =>
+                      setBroadcastForm({
+                        ...broadcastForm,
+                        image_url: e.target.value,
+                      })
+                    }
+                    placeholder="Paste image URL or click Upload Image..."
+                  />
+                </div>
 
-                  {/* Meal Type */}
-                  <div className="mb-3">
-                    <label className="form-label fw-semibold">Meal Type</label>
-                    <select
-                      className="form-select"
-                      value={recipeForm.meal_type}
-                      onChange={(e) =>
-                        setRecipeForm({
-                          ...recipeForm,
-                          meal_type: e.target.value,
-                        })
-                      }
-                    >
-                      <option value="breakfast">breakfast</option>
-                      <option value="lunch">lunch</option>
-                      <option value="dinner">dinner</option>
-                    </select>
-                  </div>
+                <button
+                  type="button"
+                  className="ntf-advanced-toggle"
+                  onClick={() => setShowAdvancedJson((v) => !v)}
+                >
+                  {showAdvancedJson ? (
+                    <ChevronUp size={14} />
+                  ) : (
+                    <ChevronDown size={14} />
+                  )}
+                  Advanced JSON Payload
+                </button>
 
-                  {/* Title */}
-                  <div className="mb-3">
-                    <label className="form-label fw-semibold">Title</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      required
-                      value={recipeForm.title}
-                      onChange={(e) =>
-                        setRecipeForm({ ...recipeForm, title: e.target.value })
-                      }
-                      placeholder="Try This Delicious Recipe! 🍝"
+                {showAdvancedJson && (
+                  <div className="ntf-field">
+                    <div className="ntf-label-row">
+                      <label htmlFor="broadcast-json" className="ntf-label">
+                        Custom Data (JSON)
+                      </label>
+                      {!activeJsonCheck.ok && (
+                        <span
+                          style={{
+                            fontSize: "0.72rem",
+                            color: "#dc2626",
+                            fontWeight: 600,
+                          }}
+                        >
+                          {activeJsonCheck.error}
+                        </span>
+                      )}
+                    </div>
+                    <textarea
+                      id="broadcast-json"
+                      className="ntf-textarea ntf-textarea-mono"
+                      rows={2}
+                      value={broadcastJsonText}
+                      onChange={(e) => setBroadcastJsonText(e.target.value)}
+                      placeholder='{"screen": "home"}'
                     />
                   </div>
+                )}
 
-                  {/* Body */}
-                  <div className="mb-3">
-                    <label className="form-label fw-semibold">Body</label>
-                    <textarea
-                      rows="3"
-                      className="form-control"
-                      required
-                      value={recipeForm.body}
-                      onChange={(e) =>
-                        setRecipeForm({ ...recipeForm, body: e.target.value })
-                      }
-                      placeholder="Perfect for a quick weeknight dinner"
-                    />
-                  </div>
+                <div className="ntf-composer-footer">
+                  <button
+                    type="submit"
+                    className="ntf-btn ntf-btn-primary ntf-btn-lg"
+                    disabled={loading}
+                  >
+                    <Send size={14} />
+                    {loading ? "Sending..." : "Send Broadcast"}
+                  </button>
+                </div>
+              </form>
+            )}
 
-                  {/* Custom Data */}
-                  <div className="mb-3">
-                    <label className="form-label fw-semibold">
-                      Custom Data (JSON)
-                    </label>
-                    <textarea
-                      className="form-control font-monospace"
-                      rows={3}
-                      value={JSON.stringify(recipeForm.custom_data, null, 2)}
-                      onChange={(e) => {
-                        try {
-                          setRecipeForm({
-                            ...recipeForm,
-                            custom_data: JSON.parse(e.target.value),
-                          });
-                        } catch {}
+            {/* ── TAB 2: MEAL REMINDER FORM ── */}
+            {activeTab === "meal" && (
+              <form onSubmit={handleMealSubmit} className="ntf-form-stack">
+                <div className="ntf-field">
+                  <div className="ntf-label-row">
+                    <span className="ntf-label">Meal Time</span>
+                    <button
+                      type="button"
+                      className="ntf-btn ntf-btn-sm"
+                      onClick={() => {
+                        const preset = MEAL_PRESETS[mealForm.meal_type];
+                        if (preset) {
+                          setMealForm((prev) => ({
+                            ...prev,
+                            title: preset.title,
+                            body: preset.body,
+                          }));
+                        }
                       }}
-                      placeholder='{"featured": true, "difficulty": "easy"}'
-                    />
+                    >
+                      Use {mealForm.meal_type} template
+                    </button>
                   </div>
 
-                  {/* Submit */}
-                  <button className="btn btn-danger w-100" disabled={loading}>
+                  <div className="ntf-segmented-3">
+                    {["breakfast", "lunch", "dinner"].map((opt) => (
+                      <button
+                        key={opt}
+                        type="button"
+                        className={`ntf-segment-btn ${
+                          mealForm.meal_type === opt ? "active" : ""
+                        }`}
+                        onClick={() =>
+                          setMealForm((prev) => ({
+                            ...prev,
+                            meal_type: opt,
+                          }))
+                        }
+                      >
+                        {opt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="ntf-field">
+                  <div className="ntf-label-row">
+                    <label htmlFor="meal-title" className="ntf-label">
+                      Title<span className="ntf-req">*</span>
+                    </label>
+                    <span
+                      className={`ntf-counter ${
+                        mealForm.title.length > 65 ? "over" : ""
+                      }`}
+                    >
+                      {mealForm.title.length} / 65
+                    </span>
+                  </div>
+                  <input
+                    id="meal-title"
+                    type="text"
+                    className="ntf-input"
+                    required
+                    value={mealForm.title}
+                    onChange={(e) =>
+                      setMealForm({ ...mealForm, title: e.target.value })
+                    }
+                    placeholder="e.g. What's Cooking for Dinner Tonight?"
+                  />
+                </div>
+
+                <div className="ntf-field">
+                  <div className="ntf-label-row">
+                    <label htmlFor="meal-body" className="ntf-label">
+                      Message<span className="ntf-req">*</span>
+                    </label>
+                    <span
+                      className={`ntf-counter ${
+                        mealForm.body.length > 180 ? "over" : ""
+                      }`}
+                    >
+                      {mealForm.body.length} / 180
+                    </span>
+                  </div>
+                  <textarea
+                    id="meal-body"
+                    className="ntf-textarea"
+                    rows={3}
+                    required
+                    value={mealForm.body}
+                    onChange={(e) =>
+                      setMealForm({ ...mealForm, body: e.target.value })
+                    }
+                    placeholder="Write a short meal reminder message..."
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  className="ntf-advanced-toggle"
+                  onClick={() => setShowAdvancedJson((v) => !v)}
+                >
+                  {showAdvancedJson ? (
+                    <ChevronUp size={14} />
+                  ) : (
+                    <ChevronDown size={14} />
+                  )}
+                  Advanced JSON Payload
+                </button>
+
+                {showAdvancedJson && (
+                  <div className="ntf-field">
+                    <div className="ntf-label-row">
+                      <label htmlFor="meal-json" className="ntf-label">
+                        Custom Data (JSON)
+                      </label>
+                      {!activeJsonCheck.ok && (
+                        <span
+                          style={{
+                            fontSize: "0.72rem",
+                            color: "#dc2626",
+                            fontWeight: 600,
+                          }}
+                        >
+                          {activeJsonCheck.error}
+                        </span>
+                      )}
+                    </div>
+                    <textarea
+                      id="meal-json"
+                      className="ntf-textarea ntf-textarea-mono"
+                      rows={2}
+                      value={mealJsonText}
+                      onChange={(e) => setMealJsonText(e.target.value)}
+                      placeholder='{"campaign": "evening_reminder"}'
+                    />
+                  </div>
+                )}
+
+                <div className="ntf-composer-footer">
+                  <button
+                    type="submit"
+                    className="ntf-btn ntf-btn-primary ntf-btn-lg"
+                    disabled={loading}
+                  >
+                    <Send size={14} />
+                    {loading ? "Sending..." : "Send Meal Reminder"}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* ── TAB 3: RECIPE FEATURE FORM ── */}
+            {activeTab === "recipe" && (
+              <form onSubmit={handleRecipeSubmit} className="ntf-form-stack">
+                <div className="ntf-field">
+                  <span className="ntf-label">
+                    Featured Recipe<span className="ntf-req">*</span>
+                  </span>
+                  <div
+                    className={`ntf-recipe-selector ${
+                      recipeForm.recipe_id ? "selected" : ""
+                    }`}
+                  >
+                    {recipeForm.recipe_id ? (
+                      <div className="ntf-recipe-left">
+                        {recipeForm.recipe_image_url && (
+                          <img
+                            src={recipeForm.recipe_image_url}
+                            alt={recipeForm.recipe_name}
+                            className="ntf-recipe-thumb"
+                          />
+                        )}
+                        <div style={{ minWidth: 0 }}>
+                          <div className="ntf-recipe-title">
+                            {recipeForm.recipe_name}
+                          </div>
+                          <div className="ntf-recipe-sub">
+                            Recipe #{recipeForm.recipe_id}
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ minWidth: 0 }}>
+                        <div className="ntf-recipe-title">
+                          No recipe selected
+                        </div>
+                        <div className="ntf-recipe-sub">
+                          Choose a recipe from your catalog to feature
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      className="ntf-btn ntf-btn-primary"
+                      onClick={() => setShowRecipeModal(true)}
+                    >
+                      {recipeForm.recipe_id ? "Change Recipe" : "Select Recipe"}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="ntf-field">
+                  <span className="ntf-label">Meal Category</span>
+                  <div className="ntf-segmented-3">
+                    {["breakfast", "lunch", "dinner"].map((mealType) => (
+                      <button
+                        key={mealType}
+                        type="button"
+                        className={`ntf-segment-btn ${
+                          recipeForm.meal_type === mealType ? "active" : ""
+                        }`}
+                        onClick={() =>
+                          setRecipeForm((prev) => ({
+                            ...prev,
+                            meal_type: mealType,
+                          }))
+                        }
+                      >
+                        {mealType}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="ntf-field">
+                  <div className="ntf-label-row">
+                    <label htmlFor="recipe-title" className="ntf-label">
+                      Title<span className="ntf-req">*</span>
+                    </label>
+                    <span
+                      className={`ntf-counter ${
+                        recipeForm.title.length > 65 ? "over" : ""
+                      }`}
+                    >
+                      {recipeForm.title.length} / 65
+                    </span>
+                  </div>
+                  <input
+                    id="recipe-title"
+                    type="text"
+                    className="ntf-input"
+                    required
+                    value={recipeForm.title}
+                    onChange={(e) =>
+                      setRecipeForm({ ...recipeForm, title: e.target.value })
+                    }
+                    placeholder="Select a recipe above or enter a title..."
+                  />
+                </div>
+
+                <div className="ntf-field">
+                  <div className="ntf-label-row">
+                    <label htmlFor="recipe-body" className="ntf-label">
+                      Message<span className="ntf-req">*</span>
+                    </label>
+                    <span
+                      className={`ntf-counter ${
+                        recipeForm.body.length > 180 ? "over" : ""
+                      }`}
+                    >
+                      {recipeForm.body.length} / 180
+                    </span>
+                  </div>
+                  <textarea
+                    id="recipe-body"
+                    className="ntf-textarea"
+                    rows={3}
+                    required
+                    value={recipeForm.body}
+                    onChange={(e) =>
+                      setRecipeForm({ ...recipeForm, body: e.target.value })
+                    }
+                    placeholder="Enter notification message..."
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  className="ntf-advanced-toggle"
+                  onClick={() => setShowAdvancedJson((v) => !v)}
+                >
+                  {showAdvancedJson ? (
+                    <ChevronUp size={14} />
+                  ) : (
+                    <ChevronDown size={14} />
+                  )}
+                  Advanced JSON Payload
+                </button>
+
+                {showAdvancedJson && (
+                  <div className="ntf-field">
+                    <div className="ntf-label-row">
+                      <label htmlFor="recipe-json" className="ntf-label">
+                        Custom Data (JSON)
+                      </label>
+                      {!activeJsonCheck.ok && (
+                        <span
+                          style={{
+                            fontSize: "0.72rem",
+                            color: "#dc2626",
+                            fontWeight: 600,
+                          }}
+                        >
+                          {activeJsonCheck.error}
+                        </span>
+                      )}
+                    </div>
+                    <textarea
+                      id="recipe-json"
+                      className="ntf-textarea ntf-textarea-mono"
+                      rows={2}
+                      value={recipeJsonText}
+                      onChange={(e) => setRecipeJsonText(e.target.value)}
+                      placeholder='{"featured": true}'
+                    />
+                  </div>
+                )}
+
+                <div className="ntf-composer-footer">
+                  <button
+                    type="submit"
+                    className="ntf-btn ntf-btn-primary ntf-btn-lg"
+                    disabled={loading}
+                  >
+                    <Send size={14} />
                     {loading ? "Sending..." : "Send Recipe Notification"}
                   </button>
+                </div>
+              </form>
+            )}
+          </div>
+        </section>
 
-                  <DeliveryStatsCard stats={deliveryStats} />
-                </form>
+        {/* RIGHT COLUMN: Clean Live Mobile Preview + Delivery Report + History */}
+        <aside className="ntf-side">
+          {/* LIVE DEVICE PREVIEW CARD */}
+          <section className="ntf-card">
+            <div className="ntf-card-header">
+              <h2 className="ntf-card-title">Live Preview</h2>
+
+              <div className="ntf-preview-os-toggle">
+                <button
+                  type="button"
+                  className={`ntf-os-btn ${
+                    previewPlatform === "ios" ? "active" : ""
+                  }`}
+                  onClick={() => setPreviewPlatform("ios")}
+                >
+                  iOS
+                </button>
+                <button
+                  type="button"
+                  className={`ntf-os-btn ${
+                    previewPlatform === "android" ? "active" : ""
+                  }`}
+                  onClick={() => setPreviewPlatform("android")}
+                >
+                  Android
+                </button>
+              </div>
+            </div>
+
+            <div className="ntf-card-body">
+              <div className="ntf-phone-frame">
+                <div className="ntf-phone-statusbar">
+                  <span>9:41</span>
+                  <span>
+                    {previewPlatform === "ios"
+                      ? "Cookeaze iOS"
+                      : "Cookeaze Android"}
+                  </span>
+                </div>
+
+                {previewPlatform === "ios" && (
+                  <div className="ntf-phone-clock-wrap">
+                    <div className="ntf-phone-clock-time">9:41</div>
+                    <div className="ntf-phone-clock-date">
+                      Wednesday, November 4
+                    </div>
+                  </div>
+                )}
+
+                <div className="ntf-notif-card">
+                  <div className="ntf-notif-top">
+                    <div className="ntf-notif-app">
+                      <span className="ntf-notif-app-icon">C</span>
+                      <span>COOKEAZE</span>
+                    </div>
+                    <span className="ntf-notif-time">now</span>
+                  </div>
+
+                  <div className="ntf-notif-main">
+                    <div className="ntf-notif-copy">
+                      <div className="ntf-notif-title">
+                        {activePreview.title}
+                      </div>
+                      <div className="ntf-notif-body">{activePreview.body}</div>
+                    </div>
+
+                    {activePreview.image && (
+                      <img
+                        src={activePreview.image}
+                        alt=""
+                        className="ntf-notif-mini-thumb"
+                      />
+                    )}
+                  </div>
+
+                  {activePreview.image && (
+                    <img
+                      src={activePreview.image}
+                      alt="Rich notification banner"
+                      className="ntf-notif-rich-banner"
+                    />
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
+
+          {/* LIVE DELIVERY REPORT (Shown when a notification is sent) */}
+          {deliveryStats && (
+            <DeliveryReportPanel
+              stats={deliveryStats}
+              onClose={() => setDeliveryStats(null)}
+            />
+          )}
+
+          {/* RECENT DISPATCHES */}
+          <section className="ntf-card">
+            <div className="ntf-card-header">
+              <h2 className="ntf-card-title">Recent Dispatches</h2>
+              {recentHistory.length > 0 && (
+                <button
+                  type="button"
+                  className="ntf-btn ntf-btn-sm"
+                  onClick={() => {
+                    setRecentHistory([]);
+                    saveRecentHistory([]);
+                  }}
+                >
+                  Clear
+                </button>
               )}
+            </div>
+
+            <div className="ntf-card-body">
+              {recentHistory.length === 0 ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "16px 8px",
+                    color: "#64748b",
+                    fontSize: "0.78rem",
+                  }}
+                >
+                  Sent notifications will appear here for 1-click reuse.
+                </div>
+              ) : (
+                <div className="ntf-history-list">
+                  {recentHistory.map((item) => (
+                    <div key={item.id} className="ntf-history-item">
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <span className="ntf-badge ntf-badge-emerald">
+                          {String(item.channel || "broadcast").toUpperCase()}
+                        </span>
+                        <div className="ntf-history-title">{item.title}</div>
+                        <div className="ntf-history-body">{item.body}</div>
+                        <div className="ntf-history-meta">
+                          Sent at {item.sentAt}
+                          {typeof item.total === "number" && item.total > 0
+                            ? ` • ${item.success ?? 0}/${item.total} delivered`
+                            : " • Delivered to devices"}
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        className="ntf-btn ntf-btn-sm"
+                        onClick={() => handleReuseHistoryItem(item)}
+                      >
+                        Reuse
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </aside>
+      </div>
+
+      {/* ── Recipe Picker Modal ── */}
+      {showRecipeModal && (
+        <div
+          className="ntf-modal-backdrop"
+          onClick={() => setShowRecipeModal(false)}
+        >
+          <div
+            className="ntf-modal"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="ntf-modal-header">
+              <h2 className="ntf-card-title">Select Recipe to Feature</h2>
+              <button
+                type="button"
+                className="ntf-toast-close"
+                onClick={() => setShowRecipeModal(false)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="ntf-modal-search">
+              <input
+                type="text"
+                className="ntf-input"
+                placeholder="Search recipes by title..."
+                value={recipeSearch}
+                onChange={(e) => {
+                  setRecipeSearch(e.target.value);
+                  setRecipePage(1);
+                }}
+                autoFocus
+              />
+              {recipeSearch && (
+                <button
+                  type="button"
+                  className="ntf-btn ntf-btn-sm"
+                  onClick={() => {
+                    setRecipeSearch("");
+                    setRecipePage(1);
+                  }}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+
+            <div className="ntf-modal-body">
+              {loadingRecipes ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "36px 20px",
+                    color: "#64748b",
+                    fontSize: "0.82rem",
+                  }}
+                >
+                  Loading recipes...
+                </div>
+              ) : recipes.length === 0 ? (
+                <div
+                  style={{
+                    textAlign: "center",
+                    padding: "36px 20px",
+                    color: "#64748b",
+                    fontSize: "0.82rem",
+                  }}
+                >
+                  No recipes found matching your search.
+                </div>
+              ) : (
+                <div className="ntf-recipe-grid">
+                  {recipes.map((recipe) => {
+                    const isSelected =
+                      Number(recipeForm.recipe_id) === Number(recipe.id);
+                    return (
+                      <button
+                        key={recipe.id}
+                        type="button"
+                        className={`ntf-recipe-card ${
+                          isSelected ? "selected" : ""
+                        }`}
+                        onClick={() => selectRecipe(recipe)}
+                      >
+                        {recipe.image_url ? (
+                          <img
+                            src={recipe.image_url}
+                            alt={recipe.name}
+                            className="ntf-recipe-thumb"
+                            loading="lazy"
+                          />
+                        ) : (
+                          <div className="ntf-recipe-thumb" />
+                        )}
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div className="ntf-recipe-title">{recipe.name}</div>
+                          <div className="ntf-recipe-sub">
+                            {recipe.total_time || 0} mins •{" "}
+                            {recipe.servings || 1} servings
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="ntf-modal-footer">
+              <span>
+                Page {recipePage} of {totalRecipePages}
+                {recipesCount > 0 ? ` (${recipesCount} recipes)` : ""}
+              </span>
+              <div style={{ display: "flex", gap: "8px" }}>
+                <button
+                  type="button"
+                  className="ntf-btn ntf-btn-sm"
+                  disabled={recipePage <= 1 || loadingRecipes}
+                  onClick={() => setRecipePage((p) => Math.max(1, p - 1))}
+                >
+                  Previous
+                </button>
+                <button
+                  type="button"
+                  className="ntf-btn ntf-btn-sm"
+                  disabled={recipePage >= totalRecipePages || loadingRecipes}
+                  onClick={() =>
+                    setRecipePage((p) => Math.min(totalRecipePages, p + 1))
+                  }
+                >
+                  Next
+                </button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
-    </>
+      )}
+    </div>
   );
-};
+}
 
-export default NotificationAdmin;
+function DeliveryReportPanel({ stats, onClose }) {
+  if (!stats) return null;
+
+  const isSending = stats.state === "sending";
+  const total = stats.totalDevices ?? 0;
+  const success = stats.successCount ?? 0;
+  const failure = stats.failureCount ?? Math.max(0, total - success);
+  const rate =
+    stats.successRate !== null && stats.successRate !== undefined
+      ? stats.successRate
+      : total > 0
+      ? ((success / total) * 100).toFixed(1)
+      : "100.0";
+
+  return (
+    <section className="ntf-card">
+      <div className="ntf-card-header">
+        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <h2 className="ntf-card-title">Delivery Report</h2>
+          <span
+            className={`ntf-badge ${
+              isSending ? "ntf-badge-amber" : "ntf-badge-emerald"
+            }`}
+          >
+            {isSending ? (
+              <>
+                <Clock size={11} />
+                Syncing
+              </>
+            ) : (
+              <>
+                <CheckCircle2 size={11} />
+                Delivered
+              </>
+            )}
+          </span>
+        </div>
+
+        <button type="button" className="ntf-toast-close" onClick={onClose}>
+          <X size={15} />
+        </button>
+      </div>
+
+      <div className="ntf-card-body">
+        <div
+          style={{
+            background: isSending ? "#fffbeb" : "#f0fdf4",
+            border: `1px solid ${isSending ? "#fde68a" : "#bbf7d0"}`,
+            borderRadius: "6px",
+            padding: "10px 12px",
+            marginBottom: "12px",
+          }}
+        >
+          <div
+            style={{
+              fontSize: "0.8rem",
+              fontWeight: 700,
+              color: isSending ? "#92400e" : "#166534",
+              marginBottom: "2px",
+            }}
+          >
+            {stats.title || "Push Notification"}
+          </div>
+          <div
+            style={{
+              fontSize: "0.75rem",
+              color: isSending ? "#b45309" : "#15803d",
+              lineHeight: 1.45,
+            }}
+          >
+            {stats.serverMessage}
+          </div>
+        </div>
+
+        {stats.hasDeviceBreakdown ? (
+          <div className="ntf-stats-grid">
+            <div className="ntf-stat-box">
+              <div className="ntf-stat-label">Total Devices</div>
+              <div className="ntf-stat-val">{total.toLocaleString()}</div>
+            </div>
+            <div className="ntf-stat-box">
+              <div className="ntf-stat-label">Success Rate</div>
+              <div className="ntf-stat-val" style={{ color: "#15803d" }}>
+                {rate}%
+              </div>
+            </div>
+            <div className="ntf-stat-box">
+              <div className="ntf-stat-label">Delivered</div>
+              <div className="ntf-stat-val" style={{ color: "#15803d" }}>
+                {success.toLocaleString()}
+              </div>
+            </div>
+            <div className="ntf-stat-box">
+              <div className="ntf-stat-label">Failed</div>
+              <div className="ntf-stat-val" style={{ color: "#dc2626" }}>
+                {failure.toLocaleString()}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="ntf-stats-grid">
+            <div className="ntf-stat-box">
+              <div className="ntf-stat-label">Status</div>
+              <div
+                className="ntf-stat-val"
+                style={{ fontSize: "0.9rem", color: "#15803d" }}
+              >
+                {isSending ? "Delivering..." : "Delivered"}
+              </div>
+            </div>
+            <div className="ntf-stat-box">
+              <div className="ntf-stat-label">Channel</div>
+              <div
+                className="ntf-stat-val"
+                style={{
+                  fontSize: "0.9rem",
+                  textTransform: "capitalize",
+                }}
+              >
+                {stats.channel}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
+  );
+}

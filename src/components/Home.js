@@ -1,5 +1,5 @@
-// src/components/HomeSectionAdmin.js
-import React, { useState, useEffect } from "react";
+// src/components/Home.js
+import React, { useState, useEffect, useRef } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -13,12 +13,84 @@ import {
   ChevronRight,
   Eye,
   EyeOff,
+  Layers,
+  LayoutGrid,
+  CheckCircle2,
+  AlertCircle,
+  Image as ImageIcon,
+  ExternalLink,
+  RefreshCw,
+  GripVertical,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 
 import cloudinaryService from "./cloudinaryService";
+import "./Home.css";
+
+const SECTION_TYPE_META = {
+  hero_carousel: {
+    label: "Hero Carousel",
+    hint: "Top rotating showcase slides for featured recipes or themes",
+  },
+  recipe_grid: {
+    label: "Recipe Grid",
+    hint: "Standard grid collection of curated recipes",
+  },
+  themed_recipe_grid: {
+    label: "Themed Recipe Grid",
+    hint: "Collection of recipe themes (e.g., Fitness, Breakfast)",
+  },
+  graphic_banner: {
+    label: "Graphic Banner",
+    hint: "Promotional visual banner linked to a recipe or custom URL",
+  },
+  creator_spotlight: {
+    label: "Creator Spotlight",
+    hint: "Highlights featured culinary creators on the home feed",
+  },
+  exclusive_recipes: {
+    label: "Exclusive Recipes",
+    hint: "Showcases premium or exclusive recipes only",
+  },
+};
+
+const SECTIONS_CACHE_KEY = "cookeaze_home_sections_cache_v1";
+let memorySectionsCache = null;
+const pickerResultsCache = new Map();
+
+const getCachedSections = () => {
+  if (Array.isArray(memorySectionsCache) && memorySectionsCache.length > 0) {
+    return memorySectionsCache;
+  }
+  try {
+    const raw = sessionStorage.getItem(SECTIONS_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        memorySectionsCache = parsed;
+        return parsed;
+      }
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return null;
+};
+
+const saveSectionsCache = (list) => {
+  memorySectionsCache = list;
+  try {
+    sessionStorage.setItem(SECTIONS_CACHE_KEY, JSON.stringify(list));
+  } catch {
+    // ignore storage errors
+  }
+};
 
 const HomeSectionAdmin = () => {
-  const [sections, setSections] = useState([]);
+  const initialCached = getCachedSections();
+  const [sections, setSections] = useState(initialCached || []);
+  const [initialLoading, setInitialLoading] = useState(!initialCached);
   const [loading, setLoading] = useState(false);
   const [expandedId, setExpandedId] = useState(null);
   const [editingId, setEditingId] = useState(null);
@@ -39,11 +111,22 @@ const HomeSectionAdmin = () => {
 
   const [editingItemIndex, setEditingItemIndex] = useState(null);
 
+  // Drag-and-drop state for sections
+  const [draggedSectionId, setDraggedSectionId] = useState(null);
+  const [dragOverSectionId, setDragOverSectionId] = useState(null);
+  const [reorderingSaving, setReorderingSaving] = useState(false);
+
+  // Drag-and-drop state for items inside edit/create
+  const [draggedItemIdx, setDraggedItemIdx] = useState(null);
+  const [dragOverItemIdx, setDragOverItemIdx] = useState(null);
+
+  const editItemFormRef = useRef(null);
+
   // Alert state
   const [alertMessage, setAlertMessage] = useState("");
   const [alertType, setAlertType] = useState("");
 
-  // Item form state
+  // Item form state (create)
   const [newItem, setNewItem] = useState({
     item_type: "recipe",
     item_id: "",
@@ -110,9 +193,15 @@ const HomeSectionAdmin = () => {
     "exclusive_recipes",
   ];
 
-  // Fetch sections on mount
+  // Fetch sections on mount & automatically re-sync when network reconnects
   useEffect(() => {
-    fetchSections();
+    fetchSections(true);
+    const handleOnline = () => {
+      fetchSections(true);
+    };
+    window.addEventListener("online", handleOnline);
+    return () => window.removeEventListener("online", handleOnline);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Clear alerts after timeout
@@ -132,6 +221,7 @@ const HomeSectionAdmin = () => {
     if (showSelectModal && newItem.item_type) {
       fetchAvailableItems(newItem.item_type, recipesPage, recipesSearch);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [newItem.item_type, showSelectModal, recipesPage, recipesSearch]);
 
   // Fetch available items when modal opens or page/search changes (for edit)
@@ -140,9 +230,10 @@ const HomeSectionAdmin = () => {
       fetchEditAvailableItems(
         editItem.item_type,
         editRecipesPage,
-        editRecipesSearch,
+        editRecipesSearch
       );
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     editItem.item_type,
     showEditSelectModal,
@@ -154,11 +245,9 @@ const HomeSectionAdmin = () => {
   useEffect(() => {
     if (newItem.item_id && availableItems.length > 0) {
       const selected = availableItems.find(
-        (item) => item.id === parseInt(newItem.item_id),
+        (item) => item.id === parseInt(newItem.item_id, 10)
       );
-      setSelectedItemPreview(selected || null);
-    } else {
-      setSelectedItemPreview(null);
+      if (selected) setSelectedItemPreview(selected);
     }
   }, [newItem.item_id, availableItems]);
 
@@ -166,11 +255,10 @@ const HomeSectionAdmin = () => {
   useEffect(() => {
     if (editItem.item_id && editAvailableItems.length > 0) {
       const selected = editAvailableItems.find(
-        (item) => item.id === parseInt(editItem.item_id),
+        (item) => item.id === parseInt(editItem.item_id, 10)
       );
-      setEditItemPreview(selected || null);
+      if (selected) setEditItemPreview(selected);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editItem.item_id, editAvailableItems]);
 
   const showAlert = (message, type) => {
@@ -179,6 +267,36 @@ const HomeSectionAdmin = () => {
   };
 
   const isGraphicBanner = (type) => type === "graphic_banner";
+
+  const getDefaultItemTypeForSection = (secType) => {
+    if (secType === "creator_spotlight") return "user";
+    if (secType === "themed_recipe_grid") return "theme";
+    return "recipe";
+  };
+
+  const inferItemTypeFromApi = (it, sectionType) => {
+    if (
+      sectionType === "creator_spotlight" ||
+      (it.item?.creator_name && !it.item?.name)
+    ) {
+      return "user";
+    }
+    if (sectionType === "themed_recipe_grid" || it.item?.themeName) {
+      return "theme";
+    }
+    return it.itemType || it.item_type || "recipe";
+  };
+
+  const getItemDisplayName = (obj) => {
+    if (!obj) return "";
+    return obj.name || obj.themeName || obj.creator_name || "";
+  };
+
+  const getItemDisplayImage = (obj, outerImageUrl) => {
+    if (outerImageUrl) return outerImageUrl;
+    if (!obj) return "";
+    return obj.image_url || obj.themeImage || obj.profile_picture_url || "";
+  };
 
   const hexToArgbInt = (hex) => {
     if (!hex) return parseInt("FFFF5733", 16);
@@ -198,7 +316,6 @@ const HomeSectionAdmin = () => {
     return hexToArgbInt("#FF5733");
   };
 
-  // ✅ Returns null for null/undefined/0 so callers can hide the swatch
   const argbIntToHex = (argbInt) => {
     if (argbInt === null || argbInt === undefined || argbInt === 0) return null;
     const safeNum = normalizeCardColorToInt(argbInt);
@@ -207,13 +324,68 @@ const HomeSectionAdmin = () => {
     return "#" + hex.slice(2);
   };
 
-  // ✅ Always returns a number for the API payload — never null/undefined.
-  //    Uses 0 as "no color" sentinel so the backend never wipes a stored
-  //    color when only order/title changes.
   const safeCardColorInt = (value) => {
     if (value === null || value === undefined) return 0;
     if (typeof value === "number" && !isNaN(value)) return value;
     return normalizeCardColorToInt(value);
+  };
+
+  const extractItemColorRaw = (it) => {
+    if (it.card_color !== undefined && it.card_color !== null)
+      return it.card_color;
+    if (it.cardColor !== undefined && it.cardColor !== null)
+      return it.cardColor;
+    if (it.item?.cardColor !== undefined && it.item?.cardColor !== null)
+      return it.item.cardColor;
+    if (it.item?.themeColor !== undefined && it.item?.themeColor !== null)
+      return it.item.themeColor;
+    return null;
+  };
+
+  const buildPayloadFromRawSection = (sectionObj, overrideOrder) => {
+    const mappedItems = (sectionObj.items || []).map((it) => {
+      const isAlreadyMapped = it.item_type !== undefined;
+      if (isAlreadyMapped) {
+        const out = {
+          item_type: it.item_type || "recipe",
+          card_color: safeCardColorInt(it.card_color),
+        };
+        if (it.section_item_id) out.section_item_id = it.section_item_id;
+        if (it.item_id) out.item_id = parseInt(it.item_id, 10);
+        if (it.image_url) out.image_url = it.image_url;
+        if (it.link_url) out.link_url = it.link_url;
+        return out;
+      }
+
+      const rawColor = extractItemColorRaw(it);
+      const out = {
+        item_type: inferItemTypeFromApi(it, sectionObj.type),
+        card_color:
+          rawColor !== null && rawColor !== undefined
+            ? safeCardColorInt(rawColor)
+            : 0,
+      };
+      if (it.sectionItemId) out.section_item_id = it.sectionItemId;
+      else if (it.section_item_id) out.section_item_id = it.section_item_id;
+      if (it.item?.id) out.item_id = parseInt(it.item.id, 10);
+      else if (typeof it.itemId === "number") out.item_id = it.itemId;
+
+      if (it.imageUrl) out.image_url = it.imageUrl;
+      if (it.linkUrl) out.link_url = it.linkUrl;
+      else if (it.link_url) out.link_url = it.link_url;
+
+      return out;
+    });
+
+    return {
+      title: sectionObj.title || "",
+      type: sectionObj.type,
+      order:
+        overrideOrder !== undefined
+          ? overrideOrder
+          : parseInt(sectionObj.order, 10) || 0,
+      items: mappedItems,
+    };
   };
 
   // Upload helpers
@@ -257,96 +429,357 @@ const HomeSectionAdmin = () => {
     }
   };
 
-  // Fetch sections (active + disabled)
-  const fetchSections = async () => {
+  // Fetch sections (active + disabled) progressively so active sections render immediately
+  const fetchSections = async (isInitial = false) => {
     try {
+      const cached = getCachedSections();
+      if (isInitial && !cached) {
+        setInitialLoading(true);
+      }
       setLoading(true);
       const token = localStorage.getItem("token");
 
-      const [activeRes, disabledRes] = await Promise.all([
-        fetch(`${API_BASE}/`, { headers: { accept: "application/json" } }),
-        fetch(`${API_BASE}/disabled/`, {
-          headers: {
-            accept: "application/json",
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-        }),
+      let activeSections = [];
+      let activeSucceeded = false;
+
+      const activePromise = fetch(`${API_BASE}/`, {
+        headers: { accept: "application/json" },
+      })
+        .then((res) => res.json())
+        .then((activeData) => {
+          if (activeData && activeData.isSuccessful) {
+            activeSucceeded = true;
+            activeSections = (activeData.data || []).map((s) => ({
+              ...s,
+              is_active: s.is_active !== undefined ? s.is_active : true,
+            }));
+
+            // Render active sections immediately without waiting for the slower /disabled/ endpoint
+            if (!cached) {
+              const quickSorted = [...activeSections]
+                .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+                .map((sec, idx) => ({ ...sec, order: idx }));
+              setSections(quickSorted);
+              setInitialLoading(false);
+            }
+          }
+          return activeData;
+        });
+
+      const disabledPromise = fetch(`${API_BASE}/disabled/`, {
+        headers: {
+          accept: "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+      })
+        .then((res) => res.json())
+        .catch(() => ({ isSuccessful: false, data: [] }));
+
+      const [, disabledData] = await Promise.all([
+        activePromise,
+        disabledPromise,
       ]);
 
-      const activeData = await activeRes.json();
-      const disabledData = await disabledRes.json();
-
-      const activeSections = activeData.isSuccessful ? (activeData.data || []) : [];
-      const disabledSections = disabledData.isSuccessful
+      const disabledSections = disabledData?.isSuccessful
         ? (disabledData.data || []).map((s) => ({ ...s, is_active: false }))
         : [];
 
-      if (activeData.isSuccessful || disabledData.isSuccessful) {
-        setSections([...activeSections, ...disabledSections]);
-      } else {
+      if (activeSucceeded || disabledData?.isSuccessful) {
+        // Preserve current relative arrangement: sort by existing order, then active before hidden, then id
+        const combined = [...activeSections, ...disabledSections].sort(
+          (a, b) => {
+            const ordDiff = (a.order ?? 0) - (b.order ?? 0);
+            if (ordDiff !== 0) return ordDiff;
+            if (a.is_active !== b.is_active) return a.is_active ? -1 : 1;
+            return (a.id ?? 0) - (b.id ?? 0);
+          }
+        );
+
+        // Assign unique sequential order numbers (0, 1, 2, ...) so no two sections share the same number
+        const sectionsToSync = [];
+        const normalized = combined.map((sec, idx) => {
+          if (sec.order !== idx) {
+            sectionsToSync.push({ ...sec, order: idx });
+          }
+          return { ...sec, order: idx };
+        });
+
+        setSections(normalized);
+        saveSectionsCache(normalized);
+
+        // Sync any duplicate/colliding order numbers to backend in the background
+        if (sectionsToSync.length > 0) {
+          Promise.all(
+            sectionsToSync.map((sec) => {
+              const payload = buildPayloadFromRawSection(sec, sec.order);
+              return fetch(`${API_BASE}/${sec.id}/`, {
+                method: "PUT",
+                headers: {
+                  "Content-Type": "application/json",
+                  accept: "application/json",
+                },
+                body: JSON.stringify(payload),
+              });
+            })
+          ).catch((err) =>
+            console.error("Background order normalization failed:", err)
+          );
+        }
+      } else if (!cached) {
         showAlert("Failed to fetch sections", "danger");
       }
     } catch (error) {
       console.error("Error fetching sections:", error);
-      showAlert("Failed to fetch sections", "danger");
+      if (!getCachedSections()) {
+        showAlert("Failed to fetch sections", "danger");
+      }
     } finally {
       setLoading(false);
+      setInitialLoading(false);
     }
+  };
+
+  // Drag & Drop or Arrow Reorder for Sections
+  const persistSectionOrderChanges = async (updatedList, previousMap) => {
+    const changedSections = updatedList.filter(
+      (sec) => previousMap.get(sec.id) !== sec.order
+    );
+    if (changedSections.length === 0) return;
+
+    try {
+      setReorderingSaving(true);
+      await Promise.all(
+        changedSections.map((sec) => {
+          const payload = buildPayloadFromRawSection(sec, sec.order);
+          return fetch(`${API_BASE}/${sec.id}/`, {
+            method: "PUT",
+            headers: {
+              "Content-Type": "application/json",
+              accept: "application/json",
+            },
+            body: JSON.stringify(payload),
+          });
+        })
+      );
+      showAlert("Section order updated", "success");
+    } catch (err) {
+      console.error("Error saving new section order:", err);
+      showAlert("Failed to save new section order", "danger");
+      await fetchSections(false);
+    } finally {
+      setReorderingSaving(false);
+    }
+  };
+
+  const handleSectionDrop = async (targetSectionId) => {
+    if (
+      !draggedSectionId ||
+      draggedSectionId === targetSectionId ||
+      reorderingSaving
+    ) {
+      setDraggedSectionId(null);
+      setDragOverSectionId(null);
+      return;
+    }
+
+    const prevOrderMap = new Map(sections.map((s) => [s.id, s.order]));
+    const currentList = [...sections];
+    const fromIdx = currentList.findIndex((s) => s.id === draggedSectionId);
+    const toIdx = currentList.findIndex((s) => s.id === targetSectionId);
+
+    if (fromIdx === -1 || toIdx === -1) {
+      setDraggedSectionId(null);
+      setDragOverSectionId(null);
+      return;
+    }
+
+    const [moved] = currentList.splice(fromIdx, 1);
+    currentList.splice(toIdx, 0, moved);
+
+    const renumbered = currentList.map((sec, idx) => ({
+      ...sec,
+      order: idx,
+    }));
+
+    setSections(renumbered);
+    saveSectionsCache(renumbered);
+    if (editingId) {
+      const activeEdited = renumbered.find((s) => s.id === editingId);
+      if (activeEdited) {
+        setEditFormData((prev) => ({ ...prev, order: activeEdited.order }));
+      }
+    }
+
+    setDraggedSectionId(null);
+    setDragOverSectionId(null);
+
+    await persistSectionOrderChanges(renumbered, prevOrderMap);
+  };
+
+  const moveSectionByOffset = async (sectionId, offset) => {
+    if (reorderingSaving) return;
+    const prevOrderMap = new Map(sections.map((s) => [s.id, s.order]));
+    const currentList = [...sections];
+    const idx = currentList.findIndex((s) => s.id === sectionId);
+    const targetIdx = idx + offset;
+
+    if (idx === -1 || targetIdx < 0 || targetIdx >= currentList.length) return;
+
+    const [moved] = currentList.splice(idx, 1);
+    currentList.splice(targetIdx, 0, moved);
+
+    const renumbered = currentList.map((sec, i) => ({
+      ...sec,
+      order: i,
+    }));
+
+    setSections(renumbered);
+    saveSectionsCache(renumbered);
+    if (editingId) {
+      const activeEdited = renumbered.find((s) => s.id === editingId);
+      if (activeEdited) {
+        setEditFormData((prev) => ({ ...prev, order: activeEdited.order }));
+      }
+    }
+
+    await persistSectionOrderChanges(renumbered, prevOrderMap);
+  };
+
+  // Drag & Drop for Items inside Edit Mode
+  const handleEditItemDrop = (targetIdx) => {
+    if (
+      draggedItemIdx === null ||
+      draggedItemIdx === targetIdx ||
+      !editFormData.items
+    ) {
+      setDraggedItemIdx(null);
+      setDragOverItemIdx(null);
+      return;
+    }
+
+    const itemsCopy = [...editFormData.items];
+    const [moved] = itemsCopy.splice(draggedItemIdx, 1);
+    itemsCopy.splice(targetIdx, 0, moved);
+
+    setEditFormData((prev) => ({
+      ...prev,
+      items: itemsCopy,
+    }));
+
+    setDraggedItemIdx(null);
+    setDragOverItemIdx(null);
+  };
+
+  // Drag & Drop for Items inside Create Mode
+  const handleCreateItemDrop = (targetIdx) => {
+    if (draggedItemIdx === null || draggedItemIdx === targetIdx) {
+      setDraggedItemIdx(null);
+      setDragOverItemIdx(null);
+      return;
+    }
+
+    const itemsCopy = [...newSection.items];
+    const [moved] = itemsCopy.splice(draggedItemIdx, 1);
+    itemsCopy.splice(targetIdx, 0, moved);
+
+    setNewSection((prev) => ({
+      ...prev,
+      items: itemsCopy,
+    }));
+
+    setDraggedItemIdx(null);
+    setDragOverItemIdx(null);
+  };
+
+  // Shared cached fetcher for modal item pickers (recipes, creators, themes)
+  const fetchPickerItemsCached = async (
+    itemType,
+    sectionType,
+    page = 1,
+    search = ""
+  ) => {
+    const cacheKey = `${itemType}:${
+      sectionType === "exclusive_recipes" ? "exclusive" : "std"
+    }:${page}:${search}`;
+
+    if (pickerResultsCache.has(cacheKey)) {
+      return pickerResultsCache.get(cacheKey);
+    }
+
+    if (itemType === "recipe") {
+      let apiUrl =
+        sectionType === "exclusive_recipes"
+          ? `https://api.cookeaze.app/api/recipes/exclusive/?page=${page}`
+          : `${RECIPES_API}?page=${page}`;
+      if (search) apiUrl += `&search=${encodeURIComponent(search)}`;
+
+      const response = await fetch(apiUrl, {
+        headers: { accept: "application/json" },
+      });
+      const data = await response.json();
+
+      if (data.isSuccessful) {
+        const list = data.data.results || [];
+        const totalCount = data.data.count || 0;
+        const itemsPerPage = list.length || 10;
+        const totalPages = Math.max(1, Math.ceil(totalCount / itemsPerPage));
+        const res = { ok: true, list, totalPages };
+        pickerResultsCache.set(cacheKey, res);
+        return res;
+      }
+      return { ok: false, list: [], totalPages: 1 };
+    }
+
+    if (itemType === "user") {
+      let apiUrl = `https://api.cookeaze.app/api/creators/?page=${page}`;
+      if (search) apiUrl += `&search=${encodeURIComponent(search)}`;
+
+      const response = await fetch(apiUrl, {
+        headers: { accept: "application/json" },
+      });
+      const data = await response.json();
+
+      if (data.isSuccessful) {
+        const list = data.data || [];
+        const totalPages = data.pagination?.total_pages || 1;
+        const res = { ok: true, list, totalPages };
+        pickerResultsCache.set(cacheKey, res);
+        return res;
+      }
+      return { ok: false, list: [], totalPages: 1 };
+    }
+
+    const response = await fetch(THEMES_API, {
+      headers: { accept: "application/json" },
+    });
+    const data = await response.json();
+
+    if (data.isSuccessful) {
+      const list = data.data?.results || data.data || [];
+      const safeList = Array.isArray(list) ? list : [];
+      const res = { ok: true, list: safeList, totalPages: 1 };
+      pickerResultsCache.set(cacheKey, res);
+      return res;
+    }
+    return { ok: false, list: [], totalPages: 1 };
   };
 
   // Fetch available items (create)
   const fetchAvailableItems = async (itemType, page = 1, search = "") => {
     try {
       setLoadingItems(true);
-
-      if (itemType === "recipe") {
-        let apiUrl = newSection.type === "exclusive_recipes" 
-          ? `https://api.cookeaze.app/api/recipes/exclusive/?page=${page}` 
-          : `${RECIPES_API}?page=${page}`;
-        if (search) apiUrl += `&search=${encodeURIComponent(search)}`;
-
-        const response = await fetch(apiUrl, {
-          headers: { accept: "application/json" },
-        });
-        const data = await response.json();
-
-        if (data.isSuccessful) {
-          setAvailableItems(data.data.results || []);
-          const totalCount = data.data.count;
-          const itemsPerPage = data.data.results?.length || 10;
-          setRecipesTotalPages(Math.ceil(totalCount / itemsPerPage));
-        } else {
-          showAlert(`Failed to fetch ${itemType}s`, "warning");
-          setAvailableItems([]);
-        }
-      } else if (itemType === "user") {
-        let apiUrl = `https://api.cookeaze.app/api/creators/?page=${page}`;
-        if (search) apiUrl += `&search=${encodeURIComponent(search)}`;
-
-        const response = await fetch(apiUrl, {
-          headers: { accept: "application/json" },
-        });
-        const data = await response.json();
-
-        if (data.isSuccessful) {
-          setAvailableItems(data.data || []);
-          const pagination = data.pagination;
-          setRecipesTotalPages(pagination?.total_pages || 1);
-        } else {
-          showAlert(`Failed to fetch creators`, "warning");
-          setAvailableItems([]);
-        }
+      const res = await fetchPickerItemsCached(
+        itemType,
+        newSection.type,
+        page,
+        search
+      );
+      if (res.ok) {
+        setAvailableItems(res.list);
+        setRecipesTotalPages(res.totalPages);
       } else {
-        const response = await fetch(THEMES_API, {
-          headers: { accept: "application/json" },
-        });
-        const data = await response.json();
-
-        if (data.isSuccessful) setAvailableItems(data.data.results || []);
-        else {
-          showAlert(`Failed to fetch ${itemType}s`, "warning");
-          setAvailableItems([]);
-        }
+        showAlert(`Failed to fetch ${itemType}s`, "warning");
+        setAvailableItems([]);
       }
     } catch (error) {
       console.error(`Error fetching ${itemType}s:`, error);
@@ -361,55 +794,18 @@ const HomeSectionAdmin = () => {
   const fetchEditAvailableItems = async (itemType, page = 1, search = "") => {
     try {
       setLoadingEditItems(true);
-
-      if (itemType === "recipe") {
-        let apiUrl = editFormData.type === "exclusive_recipes" 
-          ? `https://api.cookeaze.app/api/recipes/exclusive/?page=${page}` 
-          : `${RECIPES_API}?page=${page}`;
-        if (search) apiUrl += `&search=${encodeURIComponent(search)}`;
-
-        const response = await fetch(apiUrl, {
-          headers: { accept: "application/json" },
-        });
-        const data = await response.json();
-
-        if (data.isSuccessful) {
-          setEditAvailableItems(data.data.results || []);
-          const totalCount = data.data.count;
-          const itemsPerPage = data.data.results?.length || 10;
-          setEditRecipesTotalPages(Math.ceil(totalCount / itemsPerPage));
-        } else {
-          showAlert(`Failed to fetch ${itemType}s`, "warning");
-          setEditAvailableItems([]);
-        }
-      } else if (itemType === "user") {
-        let apiUrl = `https://api.cookeaze.app/api/creators/?page=${page}`;
-        if (search) apiUrl += `&search=${encodeURIComponent(search)}`;
-
-        const response = await fetch(apiUrl, {
-          headers: { accept: "application/json" },
-        });
-        const data = await response.json();
-
-        if (data.isSuccessful) {
-          setEditAvailableItems(data.data || []);
-          const pagination = data.pagination;
-          setEditRecipesTotalPages(pagination?.total_pages || 1);
-        } else {
-          showAlert(`Failed to fetch creators`, "warning");
-          setEditAvailableItems([]);
-        }
+      const res = await fetchPickerItemsCached(
+        itemType,
+        editFormData.type,
+        page,
+        search
+      );
+      if (res.ok) {
+        setEditAvailableItems(res.list);
+        setEditRecipesTotalPages(res.totalPages);
       } else {
-        const response = await fetch(THEMES_API, {
-          headers: { accept: "application/json" },
-        });
-        const data = await response.json();
-
-        if (data.isSuccessful) setEditAvailableItems(data.data.results || []);
-        else {
-          showAlert(`Failed to fetch ${itemType}s`, "warning");
-          setEditAvailableItems([]);
-        }
+        showAlert(`Failed to fetch ${itemType}s`, "warning");
+        setEditAvailableItems([]);
       }
     } catch (error) {
       console.error(`Error fetching ${itemType}s:`, error);
@@ -468,14 +864,13 @@ const HomeSectionAdmin = () => {
       const payload = {
         title: newSection.title || "",
         type: newSection.type,
-        order: parseInt(newSection.order) || 0,
+        order: parseInt(newSection.order, 10) || 0,
         items: newSection.items.map((item) => {
           const mappedItem = {
             item_type: item.item_type || "recipe",
-            // ✅ Always send card_color as a number — never omit it
             card_color: safeCardColorInt(item.card_color),
           };
-          if (item.item_id) mappedItem.item_id = parseInt(item.item_id);
+          if (item.item_id) mappedItem.item_id = parseInt(item.item_id, 10);
           if (item.image_url) mappedItem.image_url = item.image_url;
           if (item.link_url) mappedItem.link_url = item.link_url;
           return mappedItem;
@@ -494,11 +889,11 @@ const HomeSectionAdmin = () => {
       const data = await response.json();
 
       if (data.isSuccessful) {
-        await fetchSections();
+        await fetchSections(false);
         setNewSection({
           title: "",
-          type: "hero_carousel",
-          order: 0,
+          type: "recipe_grid",
+          order: sections.length,
           items: [],
         });
         setShowForm(false);
@@ -537,26 +932,47 @@ const HomeSectionAdmin = () => {
 
     try {
       setLoading(true);
+
+      // If an item sub-editor is currently open when "Save Changes" is clicked,
+      // merge its pending edits (like card_color) into that item so no item is missed or overwritten.
+      let itemsToPersist = [...(editFormData.items || [])];
+      if (
+        showEditItemForm &&
+        editingItemIndex !== null &&
+        itemsToPersist[editingItemIndex]
+      ) {
+        const pendingTarget = itemsToPersist[editingItemIndex];
+        itemsToPersist[editingItemIndex] = {
+          ...pendingTarget,
+          item_type: editItem.item_type || pendingTarget.item_type,
+          item_id: editItem.item_id
+            ? parseInt(editItem.item_id, 10)
+            : pendingTarget.item_id,
+          card_color: hexToArgbInt(editItem.card_color),
+          image_url: editItem.image_url || pendingTarget.image_url,
+          link_url: editItem.link_url || pendingTarget.link_url,
+        };
+      }
+
       const payload = {
         title: editFormData.title || "",
         type: editFormData.type,
-        order: parseInt(editFormData.order) || 0,
-        // ✅ Always send card_color as a number so the backend never wipes
-        //    a stored color when only the order/title changes.
-        //    safeCardColorInt returns 0 for null (meaning "no color").
-        items: (editFormData.items || []).map((item) => {
+        order: parseInt(editFormData.order, 10) || 0,
+        items: itemsToPersist.map((item) => {
           const mappedItem = {
             item_type: item.item_type || "recipe",
             card_color: safeCardColorInt(item.card_color),
           };
-          if (item.item_id) mappedItem.item_id = parseInt(item.item_id);
+          if (item.section_item_id) {
+            mappedItem.section_item_id = item.section_item_id;
+          }
+          if (item.item_id) mappedItem.item_id = parseInt(item.item_id, 10);
           if (item.image_url) mappedItem.image_url = item.image_url;
           if (item.link_url) mappedItem.link_url = item.link_url;
           return mappedItem;
         }),
       };
 
-      // Process buffered deletions first
       if (deletedItemIds.length > 0) {
         await Promise.all(
           deletedItemIds.map((sid) =>
@@ -567,8 +983,8 @@ const HomeSectionAdmin = () => {
                 accept: "application/json",
               },
               body: JSON.stringify({ section_item_id: sid }),
-            }),
-          ),
+            })
+          )
         );
       }
 
@@ -584,7 +1000,6 @@ const HomeSectionAdmin = () => {
       const data = await response.json();
 
       if (data.isSuccessful) {
-        await fetchSections();
         setEditingId(null);
         setEditFormData({});
         setEditingItemIndex(null);
@@ -596,6 +1011,7 @@ const HomeSectionAdmin = () => {
         setEditBannerFile(null);
         setUploadingEditBanner(false);
         showAlert("Section updated successfully", "success");
+        fetchSections(false);
       } else {
         showAlert(data.message || "Failed to update section", "danger");
       }
@@ -607,10 +1023,17 @@ const HomeSectionAdmin = () => {
     }
   };
 
-  // Toggle visibility
+  // Optimistic toggle visibility
   const toggleVisibility = async (id, currentStatus) => {
+    const nextStatus = !currentStatus;
+    const prevSections = sections;
+    const optimisticList = sections.map((s) =>
+      s.id === id ? { ...s, is_active: nextStatus } : s
+    );
+    setSections(optimisticList);
+    saveSectionsCache(optimisticList);
+
     try {
-      setLoading(true);
       const token = localStorage.getItem("token");
       const response = await fetch(`${API_BASE}/${id}/toggle-visibility/`, {
         method: "POST",
@@ -618,21 +1041,26 @@ const HomeSectionAdmin = () => {
           "Content-Type": "application/json",
           ...(token ? { Authorization: `Bearer ${token}` } : {}),
         },
-        body: JSON.stringify({ is_active: !currentStatus }),
+        body: JSON.stringify({ is_active: nextStatus }),
       });
       const data = await response.json();
 
       if (data.isSuccessful) {
-        await fetchSections();
-        showAlert(data.message || `Section is now ${!currentStatus ? 'visible' : 'hidden'}.`, "success");
+        showAlert(
+          data.message ||
+            `Section is now ${nextStatus ? "active" : "hidden"}.`,
+          "success"
+        );
       } else {
+        setSections(prevSections);
+        saveSectionsCache(prevSections);
         showAlert(data.message || "Failed to toggle visibility", "danger");
       }
     } catch (error) {
       console.error("Error toggling visibility:", error);
+      setSections(prevSections);
+      saveSectionsCache(prevSections);
       showAlert("Failed to toggle visibility", "danger");
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -643,26 +1071,35 @@ const HomeSectionAdmin = () => {
   };
 
   const confirmDelete = async () => {
+    const idToDelete = selectedId;
+    const prevSections = sections;
+    const optimisticRemaining = sections
+      .filter((s) => s.id !== idToDelete)
+      .map((s, idx) => ({ ...s, order: idx }));
+
+    setShowConfirm(false);
+    setSelectedId(null);
+    setSections(optimisticRemaining);
+    saveSectionsCache(optimisticRemaining);
+
     try {
-      setLoading(true);
-      const response = await fetch(`${API_BASE}/${selectedId}/`, {
+      const response = await fetch(`${API_BASE}/${idToDelete}/`, {
         method: "DELETE",
         headers: { accept: "application/json" },
       });
 
       if (response.ok) {
-        await fetchSections();
         showAlert("Section deleted successfully", "success");
       } else {
+        setSections(prevSections);
+        saveSectionsCache(prevSections);
         showAlert("Failed to delete section", "danger");
       }
     } catch (error) {
       console.error("Error deleting section:", error);
+      setSections(prevSections);
+      saveSectionsCache(prevSections);
       showAlert("Failed to delete section", "danger");
-    } finally {
-      setLoading(false);
-      setShowConfirm(false);
-      setSelectedId(null);
     }
   };
 
@@ -678,12 +1115,12 @@ const HomeSectionAdmin = () => {
     if (isGraphicBannerSection) {
       if (newItem.item_id) {
         if (!newItem.image_url) {
-          showAlert("Please upload/select an image first", "warning");
+          showAlert("Please upload an image first", "warning");
           return;
         }
       } else {
         if (!newItem.image_url || !newItem.link_url) {
-          showAlert("Please provide both image and link URL", "warning");
+          showAlert("Please provide both banner image and link URL", "warning");
           return;
         }
       }
@@ -697,9 +1134,14 @@ const HomeSectionAdmin = () => {
     const item = {
       item_type: newItem.item_type,
       card_color: hexToArgbInt(newItem.card_color),
+      _previewName: getItemDisplayName(selectedItemPreview),
+      _previewImage: getItemDisplayImage(
+        selectedItemPreview,
+        newItem.image_url
+      ),
     };
 
-    if (newItem.item_id) item.item_id = parseInt(newItem.item_id);
+    if (newItem.item_id) item.item_id = parseInt(newItem.item_id, 10);
 
     if (isGraphicBannerSection) {
       if (newItem.image_url) item.image_url = newItem.image_url;
@@ -712,7 +1154,7 @@ const HomeSectionAdmin = () => {
     }));
 
     setNewItem({
-      item_type: "recipe",
+      item_type: getDefaultItemTypeForSection(newSection.type),
       item_id: "",
       card_color: "#FF5733",
       image_url: "",
@@ -732,12 +1174,12 @@ const HomeSectionAdmin = () => {
     if (isGraphicBannerSection) {
       if (editItem.item_id) {
         if (!editItem.image_url) {
-          showAlert("Please upload/select an image first", "warning");
+          showAlert("Please upload an image first", "warning");
           return;
         }
       } else {
         if (!editItem.image_url || !editItem.link_url) {
-          showAlert("Please provide both image and link URL", "warning");
+          showAlert("Please provide both banner image and link URL", "warning");
           return;
         }
       }
@@ -751,30 +1193,24 @@ const HomeSectionAdmin = () => {
     const item = {
       item_type: editItem.item_type,
       card_color: hexToArgbInt(editItem.card_color),
+      _previewName: getItemDisplayName(editItemPreview),
+      _previewImage: getItemDisplayImage(
+        editItemPreview,
+        editItem.image_url
+      ),
     };
 
-    if (editItem.item_id) item.item_id = parseInt(editItem.item_id);
+    if (editItem.item_id) item.item_id = parseInt(editItem.item_id, 10);
 
     if (isGraphicBannerSection) {
       if (editItem.image_url) item.image_url = editItem.image_url;
       if (editItem.link_url) item.link_url = editItem.link_url;
     }
 
-    if (
-      editFormData.items &&
-      editingItemIndex !== null &&
-      editFormData.items[editingItemIndex]
-    ) {
-      if (editFormData.items[editingItemIndex].section_item_id) {
-        item.section_item_id =
-          editFormData.items[editingItemIndex].section_item_id;
-      }
-    }
-
     setEditFormData((prev) => {
       const prevItems = prev.items || [];
 
-      if (editingItemIndex !== null) {
+      if (editingItemIndex !== null && prevItems[editingItemIndex]) {
         const updated = [...prevItems];
         if (updated[editingItemIndex].section_item_id) {
           item.section_item_id = updated[editingItemIndex].section_item_id;
@@ -787,7 +1223,7 @@ const HomeSectionAdmin = () => {
     });
 
     setEditItem({
-      item_type: "recipe",
+      item_type: getDefaultItemTypeForSection(editFormData.type),
       item_id: "",
       card_color: "#FF5733",
       image_url: "",
@@ -801,7 +1237,7 @@ const HomeSectionAdmin = () => {
 
     showAlert(
       editingItemIndex !== null ? "Item updated" : "Item added to section",
-      "success",
+      "success"
     );
   };
 
@@ -812,7 +1248,7 @@ const HomeSectionAdmin = () => {
     }));
   };
 
-  const removeItemFromEditSection = async (indexToRemove) => {
+  const removeItemFromEditSection = (indexToRemove) => {
     const itemToRemove = editFormData.items[indexToRemove];
 
     if (itemToRemove && itemToRemove.section_item_id) {
@@ -829,7 +1265,7 @@ const HomeSectionAdmin = () => {
       setShowEditItemForm(false);
       setEditItemPreview(null);
       setEditItem({
-        item_type: "recipe",
+        item_type: getDefaultItemTypeForSection(editFormData.type),
         item_id: "",
         card_color: "#FF5733",
         image_url: "",
@@ -838,12 +1274,65 @@ const HomeSectionAdmin = () => {
     }
   };
 
+  const closeSectionDrawerOrEdit = () => {
+    setEditingId(null);
+    setExpandedId(null);
+    setEditFormData({});
+    setDeletedItemIds([]);
+    setShowEditItemForm(false);
+    setEditingItemIndex(null);
+    setEditItemPreview(null);
+  };
+
+  const startEditingSection = (section) => {
+    setEditingId(section.id);
+    setExpandedId(null);
+    setEditingItemIndex(null);
+    setDeletedItemIds([]);
+    setShowEditItemForm(false);
+    setEditItemPreview(null);
+
+    const editableItems =
+      section.items?.map((it) => {
+        const rawColor = extractItemColorRaw(it);
+        const mappedItem = {
+          item_type: inferItemTypeFromApi(it, section.type),
+          card_color:
+            rawColor !== null && rawColor !== undefined
+              ? typeof rawColor === "number"
+                ? rawColor
+                : normalizeCardColorToInt(rawColor)
+              : 0,
+          _previewName: getItemDisplayName(it.item),
+          _previewImage: getItemDisplayImage(it.item, it.imageUrl),
+        };
+
+        if (it.sectionItemId) {
+          mappedItem.section_item_id = it.sectionItemId;
+        }
+
+        if (it.item?.id) mappedItem.item_id = it.item.id;
+        else if (typeof it.itemId === "number") mappedItem.item_id = it.itemId;
+
+        if (it.imageUrl) mappedItem.image_url = it.imageUrl;
+
+        if (it.linkUrl) mappedItem.link_url = it.linkUrl;
+        else if (it.link_url) mappedItem.link_url = it.link_url;
+
+        return mappedItem;
+      }) || [];
+
+    setEditFormData({ ...section, items: editableItems });
+    setEditBannerFile(null);
+    setUploadingEditBanner(false);
+  };
+
   const filteredSections = sections.filter((section) => {
     const matchesType = filterType === "all" || section.type === filterType;
-    const matchesSearch = section.title
+    const matchesSearch = (section.title || "")
       .toLowerCase()
       .includes(searchTerm.toLowerCase());
-      
+
     let matchesVisibility = true;
     if (visibilityFilter === "visible") {
       matchesVisibility = section.is_active === true;
@@ -854,280 +1343,340 @@ const HomeSectionAdmin = () => {
     return matchesType && matchesSearch && matchesVisibility;
   });
 
-  return (
-    <div className="min-vh-100 bg-light p-4" style={{ fontFamily: "'Inter', sans-serif" }}>
-      <div className="container-fluid" style={{ maxWidth: "1400px" }}>
-        {/* Header */}
-        <div className="d-flex flex-column flex-md-row justify-content-between align-items-md-end mb-4 border-bottom pb-3">
+  const totalVisibleCount = sections.filter((s) => s.is_active).length;
+  const totalHiddenCount = sections.filter((s) => !s.is_active).length;
+  const totalItemsCount = sections.reduce(
+    (sum, s) => sum + (s.items?.length || 0),
+    0
+  );
+
+  // Shimmer skeleton during initial data fetch
+  if (initialLoading) {
+    return (
+      <div className="hsm-page">
+        <header className="hsm-header">
           <div>
-            <h1 className="h2 fw-bold text-dark mb-1">Home Section Manager</h1>
-            <p className="text-secondary mb-0">
-              Manage and organize your application's home page sections
+            <h1 className="hsm-title">Home Section Manager</h1>
+            <p className="hsm-subtitle">
+              Configure and order sections displayed on the Cookeaze mobile home screen.
             </p>
           </div>
-          <div className="mt-3 mt-md-0">
-            <button
-              onClick={() => setShowForm(!showForm)}
-              className="btn btn-primary d-flex align-items-center gap-2 shadow-sm fw-medium"
-            >
-              {showForm ? <X size={18} /> : <Plus size={18} />} 
-              {showForm ? "Cancel Creation" : "Create New Section"}
-            </button>
-          </div>
-        </div>
-
-        {/* Stats */}
-        <div className="row g-3 mb-4">
-          <div className="col-12 col-md-4">
-            <div className="card border-0 shadow-sm rounded-3 bg-white p-3 border-start border-4 border-primary h-100">
-              <div className="d-flex justify-content-between align-items-center">
-                <div>
-                  <p className="text-muted small text-uppercase mb-1 fw-bold">Total Sections</p>
-                  <h3 className="mb-0 fw-bold text-dark">{filteredSections.length}</h3>
-                </div>
-                <div className="bg-primary bg-opacity-10 p-3 rounded-3 text-primary">
-                  <Search size={24} />
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="col-12 col-md-4">
-            <div className="card border-0 shadow-sm rounded-3 bg-white p-3 border-start border-4 border-success h-100">
-              <div className="d-flex justify-content-between align-items-center">
-                <div>
-                  <p className="text-muted small text-uppercase mb-1 fw-bold">Total Items</p>
-                  <h3 className="mb-0 fw-bold text-dark">
-                    {filteredSections.reduce((sum, s) => sum + (s.items?.length || 0), 0)}
-                  </h3>
-                </div>
-                <div className="bg-success bg-opacity-10 p-3 rounded-3 text-success">
-                  <Plus size={24} />
-                </div>
-              </div>
-            </div>
-          </div>
-          <div className="col-12 col-md-4">
-            <div className="card border-0 shadow-sm rounded-3 bg-white p-3 border-start border-4 border-info h-100">
-              <div className="d-flex justify-content-between align-items-center">
-                <div>
-                  <p className="text-muted small text-uppercase mb-1 fw-bold">Section Types</p>
-                  <h3 className="mb-0 fw-bold text-dark">{new Set(filteredSections.map((s) => s.type)).size}</h3>
-                </div>
-                <div className="bg-info bg-opacity-10 p-3 rounded-3 text-info">
-                  <Eye size={24} />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Alert */}
-        {alertMessage && (
           <div
-            className={`alert alert-${alertType} alert-dismissible fade show`}
-            role="alert"
+            className="shimmer"
+            style={{ width: 170, height: 36, borderRadius: 7 }}
+          />
+        </header>
+
+        <div className="hsm-kpi-grid">
+          {[1, 2, 3, 4].map((n) => (
+            <div key={n} className="hsm-kpi-card">
+              <div style={{ width: "60%" }}>
+                <div
+                  className="shimmer"
+                  style={{ width: "75%", height: 13, marginBottom: 10 }}
+                />
+                <div
+                  className="shimmer"
+                  style={{ width: "45%", height: 26 }}
+                />
+              </div>
+              <div
+                className="shimmer"
+                style={{ width: 38, height: 38, borderRadius: 8 }}
+              />
+            </div>
+          ))}
+        </div>
+
+        <div className="hsm-filter-panel">
+          <div className="hsm-filter-top">
+            <div
+              className="shimmer"
+              style={{ width: 320, height: 36, borderRadius: 7 }}
+            />
+            <div
+              className="shimmer"
+              style={{ width: 240, height: 34, borderRadius: 7 }}
+            />
+          </div>
+          <div className="hsm-type-tabs-bar">
+            <div className="d-flex gap-2">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div
+                  key={i}
+                  className="shimmer"
+                  style={{ width: 110, height: 30, borderRadius: 6 }}
+                />
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="hsm-table-container">
+          {[1, 2, 3, 4, 5, 6].map((row) => (
+            <div key={row} className="hsm-section-item">
+              <div className="hsm-section-row">
+                <div className="shimmer" style={{ width: 56, height: 28 }} />
+                <div className="shimmer" style={{ width: "75%", height: 18 }} />
+                <div className="shimmer" style={{ width: 120, height: 16 }} />
+                <div className="shimmer" style={{ width: 140, height: 28 }} />
+                <div className="shimmer" style={{ width: 90, height: 20 }} />
+                <div className="shimmer" style={{ width: 170, height: 30 }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="hsm-page">
+      {/* Header */}
+      <header className="hsm-header">
+        <div>
+          <h1 className="hsm-title">Home Section Manager</h1>
+          <p className="hsm-subtitle">
+            Configure and order sections displayed on the Cookeaze mobile home screen.
+          </p>
+        </div>
+
+        <div className="hsm-header-actions">
+          <button
+            type="button"
+            className="hsm-btn"
+            onClick={() => fetchSections(false)}
+            disabled={loading || reorderingSaving}
+            title="Refresh sections"
           >
-            {alertMessage}
+            <RefreshCw size={14} />
+            <span>Refresh</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              const nextState = !showForm;
+              setShowForm(nextState);
+              if (nextState) {
+                setNewSection((prev) => ({
+                  ...prev,
+                  order: sections.length,
+                }));
+                setNewItem((prev) => ({
+                  ...prev,
+                  item_type: getDefaultItemTypeForSection(newSection.type),
+                }));
+              }
+            }}
+            className={`hsm-btn ${showForm ? "" : "hsm-btn--primary"}`}
+          >
+            {showForm ? <X size={15} /> : <Plus size={15} />}
+            <span>{showForm ? "Close Form" : "New Section"}</span>
+          </button>
+        </div>
+      </header>
+
+      {/* KPI Summary Strip */}
+      <section className="hsm-kpi-grid" aria-label="Home Sections Overview">
+        <div className="hsm-kpi-card">
+          <div>
+            <div className="hsm-kpi-label">Total Sections</div>
+            <div className="hsm-kpi-value">{sections.length}</div>
+          </div>
+          <div className="hsm-kpi-icon">
+            <Layers size={18} />
+          </div>
+        </div>
+
+        <div className="hsm-kpi-card">
+          <div>
+            <div className="hsm-kpi-label">Active on App</div>
+            <div className="hsm-kpi-value">{totalVisibleCount}</div>
+          </div>
+          <div className="hsm-kpi-icon">
+            <Eye size={18} />
+          </div>
+        </div>
+
+        <div className="hsm-kpi-card">
+          <div>
+            <div className="hsm-kpi-label">Hidden Sections</div>
+            <div className="hsm-kpi-value">{totalHiddenCount}</div>
+          </div>
+          <div className="hsm-kpi-icon">
+            <EyeOff size={18} />
+          </div>
+        </div>
+
+        <div className="hsm-kpi-card">
+          <div>
+            <div className="hsm-kpi-label">Curated Items</div>
+            <div className="hsm-kpi-value">{totalItemsCount}</div>
+          </div>
+          <div className="hsm-kpi-icon">
+            <LayoutGrid size={18} />
+          </div>
+        </div>
+      </section>
+
+      {/* Alert Banner */}
+      {alertMessage && (
+        <div
+          className={`hsm-alert hsm-alert--${alertType || "success"}`}
+          role="alert"
+        >
+          <div className="d-flex align-items-center gap-2">
+            {alertType === "danger" || alertType === "warning" ? (
+              <AlertCircle size={17} />
+            ) : (
+              <CheckCircle2 size={17} />
+            )}
+            <span>{alertMessage}</span>
+          </div>
+          <button
+            type="button"
+            className="hsm-btn hsm-btn--sm"
+            onClick={() => setAlertMessage("")}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Create New Section Panel */}
+      {showForm && (
+        <section className="hsm-editor-panel" aria-label="Create New Section">
+          <div className="hsm-editor-header">
+            <h2 className="hsm-editor-title">
+              <Plus size={16} />
+              <span>Create New Home Section</span>
+            </h2>
             <button
               type="button"
-              className="btn-close"
-              onClick={() => setAlertMessage("")}
-            ></button>
+              className="hsm-btn hsm-btn--icon"
+              onClick={() => setShowForm(false)}
+              title="Close form"
+            >
+              <X size={15} />
+            </button>
           </div>
-        )}
 
-        {/* Controls */}
-        <div className="card border-0 shadow-sm rounded-3 bg-white mb-4">
-          <div className="card-body p-3 p-md-4">
-            <div className="row g-3 align-items-center">
-              <div className="col-12 col-md-4">
-                <div className="input-group shadow-sm">
-                  <span className="input-group-text bg-white border-end-0 text-muted">
-                    <Search size={18} />
-                  </span>
-                  <input
-                    type="text"
-                    placeholder="Search sections..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="form-control border-start-0 ps-0"
-                  />
-                </div>
-              </div>
-
-              <div className="col-12 col-md-4">
-                <select
-                  value={filterType}
-                  onChange={(e) => setFilterType(e.target.value)}
-                  className="form-select shadow-sm"
-                >
-                  <option value="all">All Types</option>
-                  {sectionTypes.map((type) => (
-                    <option key={type} value={type}>
-                      {type}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="col-12 col-md-4">
-                <select
-                  value={visibilityFilter}
-                  onChange={(e) => setVisibilityFilter(e.target.value)}
-                  className="form-select shadow-sm"
-                >
-                  <option value="all">All Visibility</option>
-                  <option value="visible">Visible Only</option>
-                  <option value="hidden">Hidden Only</option>
-                </select>
-              </div>
-            </div>
-            {loading && <div className="mt-3 text-primary small fw-medium d-flex align-items-center"><span className="spinner-border spinner-border-sm me-2"></span>Loading data...</div>}
-          </div>
-        </div>
-
-        {/* Create Form */}
-        {showForm && (
-          <div className="card border-0 shadow-sm rounded-3 p-4 mb-4 bg-white border-top border-4 border-primary">
-            <h4 className="fw-bold mb-4 text-dark">Create New Section</h4>
-
-            <div className="row g-3 mb-4">
-              <div className="col-12 col-md-4">
+          <div className="hsm-editor-body">
+            <div className="hsm-form-grid">
+              <div>
+                <label className="hsm-field-label">Section Title</label>
                 <input
                   type="text"
-                  placeholder="Section Title"
+                  placeholder="e.g., Weekend Grills & Roasts"
                   value={newSection.title}
                   onChange={(e) =>
                     setNewSection({ ...newSection, title: e.target.value })
                   }
-                  className="form-control"
+                  className="hsm-input"
                 />
               </div>
 
-              <div className="col-12 col-md-4">
+              <div>
+                <label className="hsm-field-label">Section Layout Type</label>
                 <select
                   value={newSection.type}
                   onChange={(e) => {
                     const newType = e.target.value;
                     setNewSection({ ...newSection, type: newType });
-                    if (newType === "creator_spotlight") {
-                      setNewItem(prev => ({ ...prev, item_type: "user", item_id: "" }));
-                      setSelectedItemPreview(null);
-                    } else if (newType === "exclusive_recipes") {
-                      setNewItem(prev => ({ ...prev, item_type: "recipe", item_id: "" }));
-                      setSelectedItemPreview(null);
-                    } else if (newItem.item_type === "user") {
-                      setNewItem(prev => ({ ...prev, item_type: "recipe", item_id: "" }));
-                      setSelectedItemPreview(null);
-                    }
+                    setNewItem((prev) => ({
+                      ...prev,
+                      item_type: getDefaultItemTypeForSection(newType),
+                      item_id: "",
+                    }));
+                    setSelectedItemPreview(null);
                   }}
-                  className="form-select"
+                  className="hsm-select"
                 >
                   {sectionTypes.map((type) => (
                     <option key={type} value={type}>
-                      {type}
+                      {SECTION_TYPE_META[type]?.label || type} ({type})
                     </option>
                   ))}
                 </select>
+                <div className="hsm-type-hint">
+                  {SECTION_TYPE_META[newSection.type]?.hint}
+                </div>
               </div>
 
-              <div className="col-12 col-md-4">
+              <div>
+                <label className="hsm-field-label">Display Order</label>
                 <input
                   type="number"
-                  placeholder="Order"
+                  placeholder="0"
                   value={newSection.order}
                   onChange={(e) =>
                     setNewSection({
                       ...newSection,
-                      order: parseInt(e.target.value) || 0,
+                      order: parseInt(e.target.value, 10) || 0,
                     })
                   }
-                  className="form-control"
+                  className="hsm-input"
                 />
+                <div className="hsm-type-hint">Position index (0, 1, 2...)</div>
               </div>
             </div>
 
-            {/* Items */}
-            <div className="mb-4">
-              <h6 className="fw-bold mb-3">
-                Items ({newSection.items.length})
-              </h6>
+            {/* Section Items Sub-Box */}
+            <div className="hsm-items-box">
+              <div className="hsm-items-box-header">
+                <h3 className="hsm-items-box-title">
+                  <span>Section Items ({newSection.items.length})</span>
+                  {newSection.items.length > 1 && (
+                    <span className="hsm-drag-hint">
+                      • Drag cards to reorder
+                    </span>
+                  )}
+                </h3>
+                {!showItemForm && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewItem({
+                        item_type: getDefaultItemTypeForSection(
+                          newSection.type
+                        ),
+                        item_id: "",
+                        card_color: "#FF5733",
+                        image_url: "",
+                        link_url: "",
+                      });
+                      setShowItemForm(true);
+                    }}
+                    className="hsm-btn hsm-btn--sm hsm-btn--primary"
+                  >
+                    <Plus size={14} />
+                    <span>Add Item</span>
+                  </button>
+                )}
+              </div>
 
-              {newSection.items.length > 0 && (
-                <div className="mb-3">
-                  {newSection.items.map((item, idx) => {
-                    const swatchColor = argbIntToHex(item.card_color);
-                    return (
-                      <div
-                        key={`${item.item_id ?? "noid"}-${item.card_color}-${idx}`}
-                        className="card mb-2 p-3 d-flex flex-row justify-content-between align-items-center"
-                      >
-                        <div className="d-flex align-items-center gap-3">
-                          {swatchColor && (
-                            <div
-                              style={{
-                                width: "30px",
-                                height: "30px",
-                                backgroundColor: swatchColor,
-                                border: "1px solid #ddd",
-                                borderRadius: "4px",
-                              }}
-                            />
-                          )}
-                          <div>
-                            <small className="text-muted d-block">
-                              Type: <strong>{item.item_type}</strong>
-                              {item.item_id && (
-                                <>
-                                  {" "}
-                                  | ID: <strong>{item.item_id}</strong>
-                                </>
-                              )}
-                              {item.card_color !== null &&
-                                item.card_color !== undefined &&
-                                item.card_color !== 0 && (
-                                  <>
-                                    {" "}
-                                    | Color: <strong>{item.card_color}</strong>
-                                  </>
-                                )}
-                            </small>
+              {/* Add Item Builder */}
+              {showItemForm && (
+                <div className="hsm-item-builder-card">
+                  <div className="hsm-item-builder-header">
+                    <h4 className="hsm-item-builder-title">Add New Item</h4>
+                    <button
+                      type="button"
+                      className="hsm-btn hsm-btn--icon"
+                      style={{ width: 28, height: 28 }}
+                      onClick={() => {
+                        setShowItemForm(false);
+                        setSelectedItemPreview(null);
+                      }}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
 
-                            {item.image_url && (
-                              <small className="text-muted d-block">
-                                Image:{" "}
-                                <strong>
-                                  {item.image_url.slice(0, 50)}...
-                                </strong>
-                              </small>
-                            )}
-
-                            {item.link_url && (
-                              <small className="text-muted d-block">
-                                Link:{" "}
-                                <strong>{item.link_url.slice(0, 50)}...</strong>
-                              </small>
-                            )}
-                          </div>
-                        </div>
-
-                        <button
-                          onClick={() => removeItemFromSection(idx)}
-                          className="btn btn-sm btn-outline-danger"
-                        >
-                          <Trash2 size={16} />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {showItemForm ? (
-                <div className="card p-3 bg-light mb-3">
-                  <div className="row g-3 mb-3">
-                    <div className="col-12 col-md-4">
-                      <label className="form-label small">Item Type</label>
+                  <div className="hsm-item-builder-grid">
+                    <div>
+                      <label className="hsm-field-label">Content Type</label>
                       <select
                         value={newItem.item_type}
                         onChange={(e) => {
@@ -1138,13 +1687,16 @@ const HomeSectionAdmin = () => {
                           });
                           setSelectedItemPreview(null);
                         }}
-                        className="form-select form-select-sm"
-                        disabled={newSection.type === "creator_spotlight" || newSection.type === "exclusive_recipes"}
+                        className="hsm-select"
+                        disabled={
+                          newSection.type === "creator_spotlight" ||
+                          newSection.type === "exclusive_recipes"
+                        }
                       >
                         {newSection.type === "creator_spotlight" ? (
-                          <option value="user">User</option>
+                          <option value="user">Creator (User)</option>
                         ) : newSection.type === "exclusive_recipes" ? (
-                          <option value="recipe">Recipe</option>
+                          <option value="recipe">Exclusive Recipe</option>
                         ) : (
                           <>
                             <option value="recipe">Recipe</option>
@@ -1154,134 +1706,129 @@ const HomeSectionAdmin = () => {
                       </select>
                     </div>
 
-                    {isGraphicBanner(newSection.type) && (
-                      <div className="col-12">
-                        <label className="form-label small">Banner Image</label>
-                        <div className="d-flex gap-2 flex-wrap">
+                    <div>
+                      <label className="hsm-field-label">
+                        {isGraphicBanner(newSection.type)
+                          ? "Linked Item (Optional)"
+                          : "Select Content"}
+                      </label>
+                      <button
+                        type="button"
+                        onClick={openSelectModal}
+                        className="hsm-btn w-100 justify-content-between"
+                      >
+                        <span className="text-truncate">
+                          {newItem.item_id
+                            ? `${
+                                getItemDisplayName(selectedItemPreview) ||
+                                `ID #${newItem.item_id}`
+                              }`
+                            : `Choose ${newItem.item_type}...`}
+                        </span>
+                        <Search size={14} />
+                      </button>
+                    </div>
+
+                    <div>
+                      <label className="hsm-field-label">
+                        Card Accent Color
+                      </label>
+                      <div className="hsm-color-row">
+                        <input
+                          type="color"
+                          value={newItem.card_color}
+                          onChange={(e) =>
+                            setNewItem({
+                              ...newItem,
+                              card_color: e.target.value,
+                            })
+                          }
+                          className="hsm-color-input"
+                        />
+                        <span className="hsm-section-sub">
+                          {newItem.card_color.toUpperCase()}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {isGraphicBanner(newSection.type) && (
+                    <div className="hsm-item-builder-grid">
+                      <div>
+                        <label className="hsm-field-label">
+                          Banner Artwork Upload
+                        </label>
+                        <div className="d-flex gap-2">
                           <input
                             type="file"
                             accept="image/*,video/*"
-                            className="form-control form-control-sm"
+                            className="hsm-input"
                             onChange={(e) =>
                               setNewBannerFile(e.target.files?.[0] || null)
                             }
                           />
                           <button
                             type="button"
-                            className="btn btn-sm btn-outline-primary"
+                            className="hsm-btn"
                             onClick={uploadNewBannerToCloudinary}
                             disabled={uploadingNewBanner || !newBannerFile}
                           >
                             {uploadingNewBanner ? "Uploading..." : "Upload"}
                           </button>
                         </div>
-
                         {newItem.image_url && (
-                          <small className="text-muted d-block mt-2">
-                            Uploaded:{" "}
-                            <strong>{newItem.image_url.slice(0, 60)}...</strong>
-                          </small>
+                          <div className="hsm-type-hint text-truncate">
+                            Uploaded: {newItem.image_url}
+                          </div>
                         )}
                       </div>
-                    )}
 
-                    <div className="col-12 col-md-4">
-                      <label className="form-label small">
-                        {isGraphicBanner(newSection.type)
-                          ? "Select Item (Optional)"
-                          : "Select Item"}
-                      </label>
-                      <button
-                        onClick={openSelectModal}
-                        className="btn btn-sm btn-outline-primary w-100 text-start"
-                      >
-                        {newItem.item_id
-                          ? `${selectedItemPreview?.name || selectedItemPreview?.themeName || selectedItemPreview?.creator_name || "Selected"}`
-                          : `Browse ${newItem.item_type}s...`}
-                      </button>
-                    </div>
-
-                    {isGraphicBanner(newSection.type) && (
-                      <div className="col-12">
-                        <label className="form-label small">
-                          Link URL{" "}
-                          {!newItem.item_id &&
-                            "(Required for non-recipe items)"}
+                      <div>
+                        <label className="hsm-field-label">
+                          External Link URL{" "}
+                          {!newItem.item_id && "(Required if no recipe linked)"}
                         </label>
                         <input
                           type="text"
-                          placeholder="Enter link URL"
+                          placeholder="https://..."
                           value={newItem.link_url}
                           onChange={(e) =>
                             setNewItem({ ...newItem, link_url: e.target.value })
                           }
-                          className="form-control form-control-sm"
+                          className="hsm-input"
                         />
                       </div>
-                    )}
-
-                    <div className="col-12 col-md-2">
-                      <label className="form-label small">Card Color</label>
-                      <input
-                        type="color"
-                        value={newItem.card_color}
-                        onChange={(e) =>
-                          setNewItem({ ...newItem, card_color: e.target.value })
-                        }
-                        className="form-control form-control-color form-control-sm"
-                      />
                     </div>
+                  )}
 
-                    <div className="col-12 col-md-2 d-flex align-items-end">
-                      <small className="text-muted">
-                        {hexToArgbInt(newItem.card_color)}
-                      </small>
-                    </div>
-                  </div>
-
-                  {/* Preview */}
                   {selectedItemPreview && (
-                    <div className="mt-3 p-3 border rounded bg-white">
-                      <h6 className="small fw-bold mb-2">Preview:</h6>
-                      <div className="d-flex align-items-start gap-3">
-                        {(selectedItemPreview.image_url || selectedItemPreview.profile_picture_url) && (
-                          <img
-                            src={selectedItemPreview.image_url || selectedItemPreview.profile_picture_url}
-                            alt={
-                              selectedItemPreview.name ||
-                              selectedItemPreview.themeName ||
-                              selectedItemPreview.creator_name
-                            }
-                            style={{
-                              width: "100px",
-                              height: "100px",
-                              objectFit: "cover",
-                              borderRadius: "8px",
-                              border: "2px solid #ddd",
-                            }}
-                            onError={(e) => {
-                              e.target.style.display = "none";
-                            }}
-                          />
-                        )}
-                        <div className="flex-grow-1">
-                          <p className="mb-1 fw-bold">
-                            {selectedItemPreview.name ||
-                              selectedItemPreview.themeName ||
-                              selectedItemPreview.creator_name}
-                          </p>
-                          <p className="mb-1 small text-muted">
-                            ID: {selectedItemPreview.id}
-                          </p>
+                    <div className="hsm-selected-preview">
+                      {getItemDisplayImage(selectedItemPreview) && (
+                        <img
+                          src={getItemDisplayImage(selectedItemPreview)}
+                          alt={getItemDisplayName(selectedItemPreview)}
+                          className="hsm-selected-thumb"
+                          onError={(e) => {
+                            e.target.style.display = "none";
+                          }}
+                        />
+                      )}
+                      <div>
+                        <div className="hsm-item-name">
+                          {getItemDisplayName(selectedItemPreview)}
+                        </div>
+                        <div className="hsm-item-meta">
+                          ID #{selectedItemPreview.id}
                         </div>
                       </div>
                     </div>
                   )}
 
-                  <div className="d-flex gap-2 mt-3">
+                  <div className="d-flex gap-2">
                     <button
+                      type="button"
                       onClick={addItemToSection}
-                      className="btn btn-sm btn-primary"
+                      className="hsm-btn hsm-btn--sm hsm-btn--primary"
                       disabled={
                         isGraphicBanner(newSection.type)
                           ? !newItem.image_url ||
@@ -1289,1139 +1836,1678 @@ const HomeSectionAdmin = () => {
                           : !newItem.item_id
                       }
                     >
-                      <Save size={16} className="me-1" /> Add Item
+                      <Plus size={14} />
+                      <span>Confirm Item</span>
                     </button>
-
                     <button
+                      type="button"
                       onClick={() => {
                         setShowItemForm(false);
-                        setNewItem({
-                          item_type: "recipe",
-                          item_id: "",
-                          card_color: "#FF5733",
-                          image_url: "",
-                          link_url: "",
-                        });
                         setSelectedItemPreview(null);
-                        setNewBannerFile(null);
-                        setUploadingNewBanner(false);
                       }}
-                      className="btn btn-sm btn-secondary"
+                      className="hsm-btn hsm-btn--sm"
                     >
-                      <X size={16} className="me-1" /> Cancel
+                      Cancel
                     </button>
                   </div>
                 </div>
+              )}
+
+              {/* Queued Items in Create Form */}
+              {newSection.items.length > 0 ? (
+                <div className="hsm-items-grid">
+                  {newSection.items.map((item, idx) => {
+                    const swatchColor = argbIntToHex(item.card_color);
+                    const isDragged = draggedItemIdx === idx;
+                    const isDragOver = dragOverItemIdx === idx;
+                    return (
+                      <div
+                        key={`${item.item_id ?? "noid"}-${idx}`}
+                        draggable
+                        onDragStart={() => setDraggedItemIdx(idx)}
+                        onDragOver={(e) => {
+                          e.preventDefault();
+                          if (dragOverItemIdx !== idx) setDragOverItemIdx(idx);
+                        }}
+                        onDrop={(e) => {
+                          e.preventDefault();
+                          handleCreateItemDrop(idx);
+                        }}
+                        onDragEnd={() => {
+                          setDraggedItemIdx(null);
+                          setDragOverItemIdx(null);
+                        }}
+                        className={`hsm-item-card hsm-item-card--draggable ${
+                          isDragged ? "hsm-item-card--dragging" : ""
+                        } ${isDragOver ? "hsm-item-card--dragover" : ""}`}
+                      >
+                        <div className="hsm-item-card-left">
+                          <span
+                            className="hsm-drag-grip"
+                            title="Drag to reorder item"
+                          >
+                            <GripVertical size={15} />
+                          </span>
+                          {item._previewImage ? (
+                            <img
+                              src={item._previewImage}
+                              alt={item._previewName || "Item"}
+                              className="hsm-item-thumb"
+                            />
+                          ) : (
+                            <div className="hsm-item-thumb-placeholder">
+                              <ImageIcon size={17} />
+                            </div>
+                          )}
+                          <div className="hsm-item-info">
+                            <div className="hsm-item-name">
+                              {item._previewName ||
+                                (item.item_id
+                                  ? `${item.item_type} #${item.item_id}`
+                                  : "Banner Item")}
+                            </div>
+                            <div className="hsm-item-meta">
+                              <span>{item.item_type}</span>
+                              {item.item_id && <span>• ID #{item.item_id}</span>}
+                              <label
+                                className="hsm-inline-color-picker"
+                                title="Click to change this item's card color"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <input
+                                  type="color"
+                                  value={swatchColor || "#FF5733"}
+                                  onChange={(e) => {
+                                    const newColorInt = hexToArgbInt(
+                                      e.target.value
+                                    );
+                                    setNewSection((prev) => {
+                                      const updatedItems = [
+                                        ...(prev.items || []),
+                                      ];
+                                      if (updatedItems[idx]) {
+                                        updatedItems[idx] = {
+                                          ...updatedItems[idx],
+                                          card_color: newColorInt,
+                                        };
+                                      }
+                                      return {
+                                        ...prev,
+                                        items: updatedItems,
+                                      };
+                                    });
+                                  }}
+                                  className="hsm-inline-color-input"
+                                />
+                                <span
+                                  className="hsm-swatch hsm-swatch--interactive"
+                                  style={{
+                                    backgroundColor: swatchColor || "#cbd5e1",
+                                  }}
+                                />
+                                <span className="hsm-inline-color-hex">
+                                  {swatchColor
+                                    ? swatchColor.toUpperCase()
+                                    : "Color"}
+                                </span>
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => removeItemFromSection(idx)}
+                          className="hsm-btn hsm-btn--icon hsm-btn--danger"
+                          title="Remove item"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
               ) : (
-                <button
-                  onClick={() => {
-                    setNewItem({
-                      item_type: newSection.type === "creator_spotlight" ? "user" : "recipe",
-                      item_id: "",
-                      card_color: "#FF5733",
-                      image_url: "",
-                      link_url: "",
-                    });
-                    setShowItemForm(true);
-                  }}
-                  className="btn btn-sm btn-outline-primary mb-3"
-                >
-                  <Plus size={16} className="me-1" /> Add Item
-                </button>
+                !showItemForm && (
+                  <div className="hsm-section-sub">
+                    No items added yet. Click &ldquo;Add Item&rdquo; to populate this section.
+                  </div>
+                )
               )}
             </div>
 
             <div className="d-flex gap-2">
               <button
+                type="button"
                 onClick={createSection}
-                className="btn btn-success d-flex align-items-center gap-2"
+                className="hsm-btn hsm-btn--primary"
                 disabled={loading}
               >
-                <Save size={18} /> {loading ? "Saving..." : "Save"}
+                <Save size={15} />
+                <span>{loading ? "Saving..." : "Create Section"}</span>
               </button>
-
               <button
-                onClick={() => {
-                  setShowForm(false);
-                  setNewSection({
-                    type: "recipe_grid",
-                    title: "",
-                    order: 0,
-                    items: [],
-                  });
-                  setShowItemForm(false);
-                  setNewItem({
-                    item_type: "recipe",
-                    item_id: "",
-                    card_color: "#FF5733",
-                    image_url: "",
-                    link_url: "",
-                  });
-                  setSelectedItemPreview(null);
-                  setNewBannerFile(null);
-                  setUploadingNewBanner(false);
-                }}
-                className="btn btn-secondary d-flex align-items-center gap-2"
+                type="button"
+                onClick={() => setShowForm(false)}
+                className="hsm-btn"
               >
-                <X size={18} /> Cancel
+                Cancel
               </button>
             </div>
           </div>
-        )}
+        </section>
+      )}
 
-        {/* Sections List */}
-        <div className="mb-4">
-          {filteredSections.length === 0 ? (
-            <div className="card border-0 shadow-sm rounded-3 p-5 text-center bg-white">
-              <div className="text-muted mb-3"><Search size={40} opacity={0.5} /></div>
-              <h5 className="text-dark fw-bold">No sections found</h5>
-              <p className="text-secondary mb-0">Create a new section or adjust your search filters.</p>
-            </div>
-          ) : (
-            filteredSections.map((section) => (
-              <div key={section.id} className="card mb-3 border-0 shadow-sm rounded-3">
-                {/* Section Header */}
-                <div
-                  className="card-header bg-white border-bottom-0 p-3 p-md-4 d-flex flex-column flex-md-row justify-content-between align-items-md-center gap-3"
-                  onClick={() =>
-                    setExpandedId(expandedId === section.id ? null : section.id)
-                  }
-                  style={{ cursor: "pointer" }}
+      {/* Clean Filter & Search Panel */}
+      <div className="hsm-filter-panel">
+        <div className="hsm-filter-top">
+          <div className="hsm-search-wrap">
+            <Search size={15} className="hsm-search-icon" />
+            <input
+              type="text"
+              placeholder="Search sections by title..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="hsm-input hsm-input--search"
+            />
+            {searchTerm && (
+              <button
+                type="button"
+                className="hsm-search-clear"
+                onClick={() => setSearchTerm("")}
+                aria-label="Clear search"
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+
+          <div
+            className="hsm-status-tabs"
+            role="group"
+            aria-label="Visibility filter"
+          >
+            <button
+              type="button"
+              className={`hsm-status-tab ${
+                visibilityFilter === "all" ? "active" : ""
+              }`}
+              onClick={() => setVisibilityFilter("all")}
+            >
+              <span>All</span>
+              <span className="hsm-tab-count">{sections.length}</span>
+            </button>
+            <button
+              type="button"
+              className={`hsm-status-tab ${
+                visibilityFilter === "visible" ? "active" : ""
+              }`}
+              onClick={() => setVisibilityFilter("visible")}
+            >
+              <span>Active</span>
+              <span className="hsm-tab-count">{totalVisibleCount}</span>
+            </button>
+            <button
+              type="button"
+              className={`hsm-status-tab ${
+                visibilityFilter === "hidden" ? "active" : ""
+              }`}
+              onClick={() => setVisibilityFilter("hidden")}
+            >
+              <span>Hidden</span>
+              <span className="hsm-tab-count">{totalHiddenCount}</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="hsm-type-tabs-bar">
+          <div
+            className="hsm-type-tabs"
+            role="tablist"
+            aria-label="Layout type filter"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={filterType === "all"}
+              className={`hsm-type-tab ${filterType === "all" ? "active" : ""}`}
+              onClick={() => setFilterType("all")}
+            >
+              <span>All Layouts</span>
+              <span className="hsm-type-tab-count">{sections.length}</span>
+            </button>
+
+            {sectionTypes.map((type) => {
+              const countForType = sections.filter(
+                (s) => s.type === type
+              ).length;
+              return (
+                <button
+                  key={type}
+                  type="button"
+                  role="tab"
+                  aria-selected={filterType === type}
+                  className={`hsm-type-tab ${
+                    filterType === type ? "active" : ""
+                  }`}
+                  onClick={() => setFilterType(type)}
                 >
-                  <div className="d-flex align-items-center gap-3 flex-grow-1">
-                    <button className="btn btn-sm btn-light rounded-circle p-2 d-flex align-items-center justify-content-center" style={{ width: "36px", height: "36px" }}>
-                      {expandedId === section.id ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                    </button>
-                    <div>
-                      <h5 className="mb-1 fw-bold text-dark">{section.title}</h5>
-                      <div className="d-flex gap-2 flex-wrap">
-                        <span className="badge bg-primary px-3 py-2 rounded-pill fw-medium">{section.type}</span>
-                        <span className="badge bg-secondary px-3 py-2 rounded-pill fw-medium">Order: {section.order}</span>
-                        <span className="badge bg-info px-3 py-2 rounded-pill fw-medium">{section.items?.length || 0} items</span>
-                        {!section.is_active && <span className="badge bg-warning text-dark px-3 py-2 rounded-pill fw-medium">Hidden</span>}
+                  <span>{SECTION_TYPE_META[type]?.label || type}</span>
+                  <span className="hsm-type-tab-count">{countForType}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <span className="hsm-drag-hint">
+            <GripVertical size={14} />
+            <span>
+              {reorderingSaving
+                ? "Saving order..."
+                : "Drag rows or use arrows to reorder"}
+            </span>
+          </span>
+        </div>
+      </div>
+
+      {/* Structured Table-Aligned Sections List */}
+      <div className="hsm-table-container">
+        {filteredSections.length === 0 ? (
+          <div className="hsm-empty-state">
+            <div className="hsm-empty-card">
+              <div className="hsm-empty-icon-box">
+                <Search size={20} />
+              </div>
+              <h3 className="hsm-empty-title">
+                {sections.length === 0
+                  ? "No home sections created yet"
+                  : "No sections match your filters"}
+              </h3>
+              <p className="hsm-empty-desc">
+                {sections.length === 0
+                  ? "Create your first home section to start curating content on the Cookeaze mobile app."
+                  : `We couldn't find any ${
+                      visibilityFilter === "visible"
+                        ? "active "
+                        : visibilityFilter === "hidden"
+                          ? "hidden "
+                          : ""
+                    }sections${
+                      filterType !== "all"
+                        ? ` in "${
+                            SECTION_TYPE_META[filterType]?.label || filterType
+                          }"`
+                        : ""
+                    }${searchTerm ? ` matching "${searchTerm}"` : ""}.`}
+              </p>
+              <div className="hsm-empty-actions">
+                {(filterType !== "all" ||
+                  visibilityFilter !== "all" ||
+                  searchTerm) && (
+                  <button
+                    type="button"
+                    className="hsm-btn hsm-btn--primary"
+                    onClick={() => {
+                      setFilterType("all");
+                      setVisibilityFilter("all");
+                      setSearchTerm("");
+                    }}
+                  >
+                    <RefreshCw size={14} />
+                    <span>Clear All Filters</span>
+                  </button>
+                )}
+                {!showForm && (
+                  <button
+                    type="button"
+                    className="hsm-btn"
+                    onClick={() => {
+                      setShowForm(true);
+                      if (filterType !== "all") {
+                        setNewSection((prev) => ({
+                          ...prev,
+                          type: filterType,
+                          order: sections.length,
+                        }));
+                        setNewItem((prev) => ({
+                          ...prev,
+                          item_type: getDefaultItemTypeForSection(filterType),
+                        }));
+                      }
+                    }}
+                  >
+                    <Plus size={14} />
+                    <span>
+                      {filterType !== "all"
+                        ? `New ${
+                            SECTION_TYPE_META[filterType]?.label || "Section"
+                          }`
+                        : "Create Section"}
+                    </span>
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="hsm-table-head">
+              <div>Order</div>
+              <div>Section Name</div>
+              <div>Layout Type</div>
+              <div>Content Preview</div>
+              <div>Visibility</div>
+              <div style={{ textAlign: "right" }}>Actions</div>
+            </div>
+
+            {filteredSections.map((section) => {
+              const isExpanded = expandedId === section.id;
+              const isEditing = editingId === section.id;
+              const isOpen = isExpanded || isEditing;
+              const itemsList = section.items || [];
+              const typeMeta = SECTION_TYPE_META[section.type] || {
+                label: section.type,
+                hint: "",
+              };
+              const globalIndex = sections.findIndex(
+                (s) => s.id === section.id
+              );
+              const isDragged = draggedSectionId === section.id;
+              const isDragOver = dragOverSectionId === section.id;
+
+              const validThumbs = itemsList
+                .map((it) => getItemDisplayImage(it.item, it.imageUrl))
+                .filter(Boolean)
+                .slice(0, 4);
+
+              return (
+                <div
+                  key={section.id}
+                  draggable={!isEditing && !reorderingSaving}
+                  onDragStart={(e) => {
+                    if (isEditing) {
+                      e.preventDefault();
+                      return;
+                    }
+                    setDraggedSectionId(section.id);
+                  }}
+                  onDragOver={(e) => {
+                    if (!draggedSectionId || draggedSectionId === section.id)
+                      return;
+                    e.preventDefault();
+                    if (dragOverSectionId !== section.id) {
+                      setDragOverSectionId(section.id);
+                    }
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    handleSectionDrop(section.id);
+                  }}
+                  onDragEnd={() => {
+                    setDraggedSectionId(null);
+                    setDragOverSectionId(null);
+                  }}
+                  className={`hsm-section-item ${
+                    isEditing ? "hsm-section-item--editing" : ""
+                  } ${isDragged ? "hsm-section-item--dragging" : ""} ${
+                    isDragOver ? "hsm-section-item--dragover" : ""
+                  }`}
+                >
+                  {/* Fixed-Grid Section Row */}
+                  <div
+                    className="hsm-section-row"
+                    onClick={() => {
+                      if (isEditing) {
+                        closeSectionDrawerOrEdit();
+                      } else {
+                        setExpandedId(isExpanded ? null : section.id);
+                      }
+                    }}
+                  >
+                    {/* Column 1: Grip + Order Number */}
+                    <div
+                      className="hsm-col-order"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div
+                        className="hsm-section-grip"
+                        title="Drag to reorder section"
+                      >
+                        <GripVertical size={16} />
                       </div>
+                      <span className="hsm-order-badge">{section.order}</span>
                     </div>
-                  </div>
 
-                  <div className="d-flex gap-2">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        toggleVisibility(section.id, section.is_active);
-                      }}
-                      className="btn btn-outline-secondary btn-sm"
-                      title={section.is_active ? "Hide Section" : "Show Section"}
-                    >
-                      {section.is_active ? <EyeOff size={18} /> : <Eye size={18} />}
-                    </button>
+                    {/* Column 2: Section Name */}
+                    <div className="hsm-col-title">
+                      <h2 className="hsm-section-title">{section.title}</h2>
+                    </div>
 
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
+                    {/* Column 3: Layout Type */}
+                    <div className="hsm-col-type">{typeMeta.label}</div>
 
-                        setEditingId(section.id);
-                        setEditingItemIndex(null);
-                        setDeletedItemIds([]);
-                        setShowEditItemForm(false);
-                        setEditItemPreview(null);
-
-                        const editableItems =
-                          section.items?.map((it) => {
-                            const cColor =
-                              it.card_color !== undefined
-                                ? it.card_color
-                                : it.cardColor;
-                            const mappedItem = {
-                              item_type: it.item?.themeName
-                                ? "theme"
-                                : it.itemType || "recipe",
-                              // ✅ Use 0 instead of null so safeCardColorInt
-                              //    always sends a number in the PUT payload,
-                              //    preventing the backend from wiping stored colors.
-                              card_color:
-                                cColor !== null && cColor !== undefined
-                                  ? typeof cColor === "number"
-                                    ? cColor
-                                    : normalizeCardColorToInt(cColor)
-                                  : 0,
-                            };
-
-                            if (it.sectionItemId) {
-                              mappedItem.section_item_id = it.sectionItemId;
-                            }
-
-                            if (it.item?.id) mappedItem.item_id = it.item.id;
-                            else if (typeof it.itemId === "number")
-                              mappedItem.item_id = it.itemId;
-
-                            if (it.imageUrl) mappedItem.image_url = it.imageUrl;
-
-                            if (it.linkUrl) mappedItem.link_url = it.linkUrl;
-                            else if (it.link_url)
-                              mappedItem.link_url = it.link_url;
-
-                            return mappedItem;
-                          }) || [];
-
-                        setEditFormData({ ...section, items: editableItems });
-                        setEditBannerFile(null);
-                        setUploadingEditBanner(false);
-                      }}
-                      className="btn btn-outline-primary btn-sm"
-                      title="Edit"
-                    >
-                      <Edit2 size={18} />
-                    </button>
-
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteSection(section.id);
-                      }}
-                      className="btn btn-outline-danger btn-sm"
-                      title="Delete"
-                    >
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
-                </div>
-
-                {/* Edit Form */}
-                {editingId === section.id && (
-                  <div className="card-body bg-light">
-                    <h6>Edit Section</h6>
-
-                    <div className="row g-3 mb-3">
-                      <div className="col-12 col-md-4">
-                        <input
-                          type="text"
-                          placeholder="Section Title"
-                          value={editFormData.title || ""}
-                          onChange={(e) =>
-                            setEditFormData({
-                              ...editFormData,
-                              title: e.target.value,
-                            })
-                          }
-                          className="form-control"
-                        />
+                    {/* Column 4: Aligned Content Preview */}
+                    <div className="hsm-col-preview">
+                      <div className="hsm-thumb-group">
+                        {validThumbs.map((thumb, i) => (
+                          <img
+                            key={i}
+                            src={thumb}
+                            alt=""
+                            className="hsm-mini-thumb"
+                            onError={(e) => {
+                              e.target.style.display = "none";
+                            }}
+                          />
+                        ))}
                       </div>
+                      <span className="hsm-items-count-text">
+                        {itemsList.length}{" "}
+                        {itemsList.length === 1 ? "item" : "items"}
+                      </span>
+                    </div>
 
-                      <div className="col-12 col-md-4">
-                        <select
-                          value={editFormData.type || ""}
-                          onChange={(e) => {
-                            const newType = e.target.value;
-                            setEditFormData({ ...editFormData, type: newType });
-                            if (newType === "creator_spotlight") {
-                              setEditItem(prev => ({ ...prev, item_type: "user", item_id: "" }));
-                              setEditItemPreview(null);
-                            } else if (newType === "exclusive_recipes") {
-                              setEditItem(prev => ({ ...prev, item_type: "recipe", item_id: "" }));
-                              setEditItemPreview(null);
-                            } else if (editItem.item_type === "user") {
-                              setEditItem(prev => ({ ...prev, item_type: "recipe", item_id: "" }));
-                              setEditItemPreview(null);
-                            }
-                          }}
-                          className="form-select"
+                    {/* Column 5: Human Toggle Switch for Visibility */}
+                    <div
+                      className="hsm-col-status"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={Boolean(section.is_active)}
+                        onClick={() =>
+                          toggleVisibility(section.id, section.is_active)
+                        }
+                        className="hsm-switch-label"
+                        title={
+                          section.is_active
+                            ? "Click to hide section"
+                            : "Click to make section active"
+                        }
+                      >
+                        <span
+                          className={`hsm-switch-track ${
+                            section.is_active ? "hsm-switch-track--on" : ""
+                          }`}
                         >
-                          {sectionTypes.map((type) => (
-                            <option key={type} value={type}>
-                              {type}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-
-                      <div className="col-12 col-md-4">
-                        <input
-                          type="number"
-                          placeholder="Order"
-                          value={editFormData.order || 0}
-                          onChange={(e) =>
-                            setEditFormData({
-                              ...editFormData,
-                              order: parseInt(e.target.value),
-                            })
-                          }
-                          className="form-control"
-                        />
-                      </div>
+                          <span className="hsm-switch-thumb" />
+                        </span>
+                        <span
+                          className={`hsm-switch-text ${
+                            section.is_active ? "hsm-switch-text--on" : ""
+                          }`}
+                        >
+                          {section.is_active ? "Active" : "Hidden"}
+                        </span>
+                      </button>
                     </div>
 
-                    {/* Edit Items */}
-                    <div className="mb-3">
-                      <h6 className="fw-bold mb-3">
-                        Items ({editFormData.items?.length || 0})
-                      </h6>
+                    {/* Column 6: Actions */}
+                    <div
+                      className="hsm-col-actions"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <div
+                        className="hsm-order-arrows"
+                        title="Move section up or down"
+                      >
+                        <button
+                          type="button"
+                          className="hsm-order-arrow-btn"
+                          disabled={globalIndex <= 0 || reorderingSaving}
+                          onClick={() => moveSectionByOffset(section.id, -1)}
+                          aria-label="Move section up"
+                        >
+                          <ArrowUp size={13} />
+                        </button>
+                        <button
+                          type="button"
+                          className="hsm-order-arrow-btn"
+                          disabled={
+                            globalIndex === -1 ||
+                            globalIndex >= sections.length - 1 ||
+                            reorderingSaving
+                          }
+                          onClick={() => moveSectionByOffset(section.id, 1)}
+                          aria-label="Move section down"
+                        >
+                          <ArrowDown size={13} />
+                        </button>
+                      </div>
 
-                      {editFormData.items && editFormData.items.length > 0 && (
-                        <div className="mb-3">
-                          {editFormData.items.map((item, idx) => {
-                            let originalItem = null;
-                            if (section.items && section.items.length > 0) {
-                              const found = section.items.find((original) => {
-                                if (
-                                  item.section_item_id &&
-                                  original.sectionItemId
-                                ) {
-                                  return (
-                                    original.sectionItemId ===
-                                    item.section_item_id
-                                  );
-                                }
-                                if (item.item_id && original.item?.id) {
-                                  return original.item.id === item.item_id;
-                                }
-                                return false;
-                              });
-                              if (found) originalItem = found.item;
+                      <button
+                        type="button"
+                        onClick={() =>
+                          isEditing
+                            ? closeSectionDrawerOrEdit()
+                            : startEditingSection(section)
+                        }
+                        className={`hsm-btn hsm-btn--sm ${
+                          isEditing ? "hsm-btn--active-edit" : ""
+                        }`}
+                      >
+                        {isEditing ? (
+                          <>
+                            <X size={13} />
+                            <span>Close</span>
+                          </>
+                        ) : (
+                          <>
+                            <Edit2 size={13} />
+                            <span>Edit</span>
+                          </>
+                        )}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => deleteSection(section.id)}
+                        className="hsm-btn hsm-btn--icon hsm-btn--danger"
+                        title="Delete section"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (isOpen) {
+                            closeSectionDrawerOrEdit();
+                          } else {
+                            setExpandedId(section.id);
+                          }
+                        }}
+                        className="hsm-btn hsm-btn--icon"
+                        title={isOpen ? "Collapse section" : "Expand section"}
+                        aria-label={
+                          isOpen ? "Collapse section" : "Expand section"
+                        }
+                      >
+                        {isOpen ? (
+                          <ChevronUp size={15} />
+                        ) : (
+                          <ChevronDown size={15} />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Inline Edit Panel */}
+                  {isEditing && (
+                    <div className="hsm-section-drawer">
+                      <div className="hsm-form-grid">
+                        <div>
+                          <label className="hsm-field-label">
+                            Section Title
+                          </label>
+                          <input
+                            type="text"
+                            value={editFormData.title || ""}
+                            onChange={(e) =>
+                              setEditFormData({
+                                ...editFormData,
+                                title: e.target.value,
+                              })
                             }
-
-                            const displayName =
-                              originalItem?.name ??
-                              originalItem?.themeName ??
-                              originalItem?.creator_name ??
-                              item.item_name ??
-                              "Unknown";
-
-                            const swatchColor = argbIntToHex(item.card_color);
-
-                            return (
-                              <div
-                                key={`${item.section_item_id ?? item.item_id ?? "noid"}-${idx}`}
-                                className="card mb-2 p-3 d-flex flex-row justify-content-between align-items-center"
-                              >
-                                <div className="d-flex align-items-center gap-3">
-                                  {swatchColor && (
-                                    <div
-                                      style={{
-                                        width: "30px",
-                                        height: "30px",
-                                        backgroundColor: swatchColor,
-                                        border: "1px solid #ddd",
-                                        borderRadius: "4px",
-                                      }}
-                                    />
-                                  )}
-                                  <div>
-                                    <small className="text-muted d-block">
-                                      Type: <strong>{item.item_type}</strong>
-                                      {item.item_id && (
-                                        <>
-                                          {" "}
-                                          | ID: <strong>{item.item_id}</strong>
-                                        </>
-                                      )}
-                                      {item.card_color !== null &&
-                                        item.card_color !== undefined &&
-                                        item.card_color !== 0 && (
-                                          <>
-                                            {" "}
-                                            | Color:{" "}
-                                            <strong>{item.card_color}</strong>
-                                          </>
-                                        )}
-                                    </small>
-
-                                    {item.item_id && (
-                                      <small className="text-muted d-block">
-                                        Name: <strong>{displayName}</strong>
-                                      </small>
-                                    )}
-
-                                    {item.image_url && (
-                                      <small className="text-muted d-block">
-                                        Image:{" "}
-                                        <strong>
-                                          {item.image_url.slice(0, 40)}...
-                                        </strong>
-                                      </small>
-                                    )}
-
-                                    {item.link_url && (
-                                      <small className="text-muted d-block">
-                                        Link:{" "}
-                                        <strong>
-                                          {item.link_url.slice(0, 40)}...
-                                        </strong>
-                                      </small>
-                                    )}
-                                  </div>
-                                </div>
-
-                                <div className="d-flex gap-2">
-                                  <button
-                                    onClick={() => {
-                                      setEditingItemIndex(idx);
-                                      setEditItem({
-                                        item_type: editFormData.type === "creator_spotlight" ? "user" : (item.item_type || "recipe"),
-                                        item_id: item.item_id?.toString() || "",
-                                        card_color: swatchColor || "#FF5733",
-                                        image_url: item.image_url || "",
-                                        link_url: item.link_url || "",
-                                      });
-                                      setEditItemPreview(originalItem || null);
-                                      setShowEditItemForm(true);
-                                    }}
-                                    className="btn btn-sm btn-outline-primary"
-                                    title="Edit item"
-                                  >
-                                    <Edit2 size={16} />
-                                  </button>
-
-                                  <button
-                                    onClick={() =>
-                                      removeItemFromEditSection(idx)
-                                    }
-                                    className="btn btn-sm btn-outline-danger"
-                                    title="Delete item"
-                                  >
-                                    <Trash2 size={16} />
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
+                            className="hsm-input"
+                          />
                         </div>
-                      )}
 
-                      {showEditItemForm ? (
-                        <div className="card p-3 bg-light mb-3">
-                          <div className="row g-3 mb-3">
-                            <div className="col-12 col-md-4">
-                              <label className="form-label small">
-                                Item Type
-                              </label>
-                              <select
-                                value={editItem.item_type}
-                                onChange={(e) => {
-                                  setEditItem({
-                                    ...editItem,
-                                    item_type: e.target.value,
-                                    item_id: "",
-                                  });
-                                  setEditItemPreview(null);
-                                }}
-                                className="form-select form-select-sm"
-                                disabled={editFormData.type === "creator_spotlight" || editFormData.type === "exclusive_recipes"}
-                              >
-                                {editFormData.type === "creator_spotlight" ? (
-                                  <option value="user">User</option>
-                                ) : editFormData.type === "exclusive_recipes" ? (
-                                  <option value="recipe">Recipe</option>
-                                ) : (
-                                  <>
-                                    <option value="recipe">Recipe</option>
-                                    <option value="theme">Theme</option>
-                                  </>
-                                )}
-                              </select>
-                            </div>
+                        <div>
+                          <label className="hsm-field-label">
+                            Section Layout Type
+                          </label>
+                          <select
+                            value={editFormData.type || ""}
+                            onChange={(e) => {
+                              const newType = e.target.value;
+                              setEditFormData({
+                                ...editFormData,
+                                type: newType,
+                              });
+                              setEditItem((prev) => ({
+                                ...prev,
+                                item_type: getDefaultItemTypeForSection(newType),
+                                item_id: "",
+                              }));
+                              setEditItemPreview(null);
+                            }}
+                            className="hsm-select"
+                          >
+                            {sectionTypes.map((type) => (
+                              <option key={type} value={type}>
+                                {SECTION_TYPE_META[type]?.label || type} ({type})
+                              </option>
+                            ))}
+                          </select>
+                        </div>
 
-                            {isGraphicBanner(editFormData.type) && (
-                              <div className="col-12">
-                                <label className="form-label small">
-                                  Banner Image
-                                </label>
-                                <div className="d-flex gap-2 flex-wrap">
-                                  <input
-                                    type="file"
-                                    accept="image/*,video/*"
-                                    className="form-control form-control-sm"
-                                    onChange={(e) =>
-                                      setEditBannerFile(
-                                        e.target.files?.[0] || null,
-                                      )
-                                    }
-                                  />
-                                  <button
-                                    type="button"
-                                    className="btn btn-sm btn-outline-primary"
-                                    onClick={uploadEditBannerToCloudinary}
-                                    disabled={
-                                      uploadingEditBanner || !editBannerFile
-                                    }
-                                  >
-                                    {uploadingEditBanner
-                                      ? "Uploading..."
-                                      : "Upload"}
-                                  </button>
-                                </div>
+                        <div>
+                          <label className="hsm-field-label">
+                            Display Order
+                          </label>
+                          <input
+                            type="number"
+                            value={editFormData.order ?? 0}
+                            onChange={(e) =>
+                              setEditFormData({
+                                ...editFormData,
+                                order: parseInt(e.target.value, 10) || 0,
+                              })
+                            }
+                            className="hsm-input"
+                          />
+                        </div>
+                      </div>
 
-                                {editItem.image_url && (
-                                  <small className="text-muted d-block mt-2">
-                                    Uploaded:{" "}
-                                    <strong>
-                                      {editItem.image_url.slice(0, 60)}...
-                                    </strong>
-                                  </small>
-                                )}
-                              </div>
+                      {/* Editable Items */}
+                      <div className="hsm-items-box">
+                        <div className="hsm-items-box-header">
+                          <h3 className="hsm-items-box-title">
+                            <span>
+                              Section Items ({editFormData.items?.length || 0})
+                            </span>
+                            {(editFormData.items?.length || 0) > 1 && (
+                              <span className="hsm-drag-hint">
+                                • Drag cards to reorder
+                              </span>
                             )}
-
-                            <div className="col-12 col-md-4">
-                              <label className="form-label small">
-                                {isGraphicBanner(editFormData.type)
-                                  ? "Select Item (Optional)"
-                                  : "Select Item"}
-                              </label>
-                              <button
-                                onClick={openEditSelectModal}
-                                className="btn btn-sm btn-outline-primary w-100 text-start"
-                              >
-                                {editItem.item_id
-                                  ? `${editItemPreview?.name || editItemPreview?.themeName || editItemPreview?.creator_name || "Selected"}`
-                                  : `Browse ${editItem.item_type}s...`}
-                              </button>
-                            </div>
-
-                            {isGraphicBanner(editFormData.type) && (
-                              <div className="col-12">
-                                <label className="form-label small">
-                                  Link URL{" "}
-                                  {!editItem.item_id &&
-                                    "(Required for non-recipe items)"}
-                                </label>
-                                <input
-                                  type="text"
-                                  placeholder="Enter link URL"
-                                  value={editItem.link_url}
-                                  onChange={(e) =>
-                                    setEditItem({
-                                      ...editItem,
-                                      link_url: e.target.value,
-                                    })
-                                  }
-                                  className="form-control form-control-sm"
-                                />
-                              </div>
-                            )}
-
-                            <div className="col-12 col-md-2">
-                              <label className="form-label small">
-                                Card Color
-                              </label>
-                              <input
-                                type="color"
-                                value={editItem.card_color}
-                                onChange={(e) =>
-                                  setEditItem({
-                                    ...editItem,
-                                    card_color: e.target.value,
-                                  })
-                                }
-                                className="form-control form-control-color form-control-sm"
-                              />
-                            </div>
-
-                            <div className="col-12 col-md-2 d-flex align-items-end">
-                              <small className="text-muted">
-                                {hexToArgbInt(editItem.card_color)}
-                              </small>
-                            </div>
-                          </div>
-
-                          {/* Edit Item Preview */}
-                          {editItemPreview && (
-                            <div className="mt-3 p-3 border rounded bg-white">
-                              <h6 className="small fw-bold mb-2">Preview:</h6>
-                              <div className="d-flex align-items-start gap-3">
-                                {(editItemPreview.image_url || editItemPreview.profile_picture_url) && (
-                                  <img
-                                    src={editItemPreview.image_url || editItemPreview.profile_picture_url}
-                                    alt={
-                                      editItemPreview.name ||
-                                      editItemPreview.themeName ||
-                                      editItemPreview.creator_name
-                                    }
-                                    style={{
-                                      width: "100px",
-                                      height: "100px",
-                                      objectFit: "cover",
-                                      borderRadius: "8px",
-                                      border: "2px solid #ddd",
-                                    }}
-                                    onError={(e) => {
-                                      e.target.style.display = "none";
-                                    }}
-                                  />
-                                )}
-                                <div className="flex-grow-1">
-                                  <p className="mb-1 fw-bold">
-                                    {editItemPreview.name ||
-                                      editItemPreview.themeName ||
-                                      editItemPreview.creator_name}
-                                  </p>
-                                  {editItemPreview.id && (
-                                    <p className="mb-1 small text-muted">
-                                      ID: {editItemPreview.id}
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          )}
-
-                          <div className="d-flex gap-2 mt-3">
+                          </h3>
+                          {!showEditItemForm && (
                             <button
-                              onClick={addItemToEditSection}
-                              className="btn btn-sm btn-primary"
-                              disabled={
-                                isGraphicBanner(editFormData.type)
-                                  ? !editItem.image_url ||
-                                    (!editItem.item_id && !editItem.link_url)
-                                  : !editItem.item_id
-                              }
-                            >
-                              <Save size={16} className="me-1" />{" "}
-                              {editingItemIndex !== null
-                                ? "Save Item"
-                                : "Add Item"}
-                            </button>
-
-                            <button
+                              type="button"
                               onClick={() => {
-                                setShowEditItemForm(false);
+                                setShowEditItemForm(true);
                                 setEditingItemIndex(null);
                                 setEditItem({
-                                  item_type: "recipe",
+                                  item_type: getDefaultItemTypeForSection(
+                                    editFormData.type
+                                  ),
                                   item_id: "",
                                   card_color: "#FF5733",
                                   image_url: "",
                                   link_url: "",
                                 });
                                 setEditItemPreview(null);
-                                setEditBannerFile(null);
-                                setUploadingEditBanner(false);
                               }}
-                              className="btn btn-sm btn-secondary"
+                              className="hsm-btn hsm-btn--sm hsm-btn--primary"
                             >
-                              <X size={16} className="me-1" /> Cancel
+                              <Plus size={14} />
+                              <span>Add Item</span>
                             </button>
-                          </div>
+                          )}
                         </div>
-                      ) : (
-                        <button
-                          onClick={() => {
-                            setShowEditItemForm(true);
-                            setEditingItemIndex(null);
-                            setEditItem({
-                              item_type: editFormData.type === "creator_spotlight" ? "user" : "recipe",
-                              item_id: "",
-                              card_color: "#FF5733",
-                              image_url: "",
-                              link_url: "",
-                            });
-                            setEditItemPreview(null);
-                          }}
-                          className="btn btn-sm btn-outline-primary mb-3"
-                        >
-                          <Plus size={16} className="me-1" /> Add Item
-                        </button>
-                      )}
-                    </div>
 
-                    <div className="d-flex gap-2">
-                      <button
-                        onClick={() => updateSection(section.id)}
-                        className="btn btn-primary d-flex align-items-center gap-2"
-                        disabled={loading}
-                      >
-                        <Save size={18} />{" "}
-                        {loading ? "Saving..." : "Save Changes"}
-                      </button>
-
-                      <button
-                        onClick={() => {
-                          setEditingId(null);
-                          setEditFormData({});
-                          setDeletedItemIds([]);
-                          setShowEditItemForm(false);
-                          setEditingItemIndex(null);
-                          setEditItem({
-                            item_type: "recipe",
-                            item_id: "",
-                            card_color: "#FF5733",
-                            image_url: "",
-                            link_url: "",
-                          });
-                          setEditItemPreview(null);
-                          setEditRecipesPage(1);
-                          setEditRecipesSearch("");
-                          setEditRecipesSearchInput("");
-                          setEditBannerFile(null);
-                          setUploadingEditBanner(false);
-                        }}
-                        className="btn btn-secondary d-flex align-items-center gap-2"
-                      >
-                        <X size={18} /> Cancel
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Expanded Items */}
-                {expandedId === section.id && (
-                  <div className="card-body bg-light">
-                    <h6>Items ({section.items?.length || 0})</h6>
-                    {!section.items || section.items.length === 0 ? (
-                      <p className="text-secondary small">
-                        No items in this section
-                      </p>
-                    ) : (
-                      section.items.map((item, idx) => {
-                        const rawColor =
-                          item.card_color !== undefined
-                            ? item.card_color
-                            : item.cardColor;
-                        const swatchColor = argbIntToHex(rawColor);
-                        return (
+                        {showEditItemForm && (
                           <div
-                            key={`${item.sectionItemId ?? "sid"}-${item.item?.id ?? "iid"}-${idx}`}
-                            className="card mb-2"
+                            ref={editItemFormRef}
+                            className="hsm-item-builder-card"
                           >
-                            <div className="card-body d-flex justify-content-between align-items-start p-3">
-                              <div className="d-flex align-items-center gap-3">
-                                {(item.item?.image_url || item.item?.profile_picture_url) && (
+                            <div className="hsm-item-builder-header">
+                              <h4 className="hsm-item-builder-title">
+                                {editingItemIndex !== null
+                                  ? `Editing Item #${editingItemIndex + 1}`
+                                  : "Add New Item to Section"}
+                              </h4>
+                              <button
+                                type="button"
+                                className="hsm-btn hsm-btn--icon"
+                                style={{ width: 28, height: 28 }}
+                                onClick={() => {
+                                  setShowEditItemForm(false);
+                                  setEditingItemIndex(null);
+                                  setEditItemPreview(null);
+                                }}
+                              >
+                                <X size={14} />
+                              </button>
+                            </div>
+
+                            <div className="hsm-item-builder-grid">
+                              <div>
+                                <label className="hsm-field-label">
+                                  Content Type
+                                </label>
+                                <select
+                                  value={editItem.item_type}
+                                  onChange={(e) => {
+                                    setEditItem({
+                                      ...editItem,
+                                      item_type: e.target.value,
+                                      item_id: "",
+                                    });
+                                    setEditItemPreview(null);
+                                  }}
+                                  className="hsm-select"
+                                  disabled={
+                                    editFormData.type === "creator_spotlight" ||
+                                    editFormData.type === "exclusive_recipes"
+                                  }
+                                >
+                                  {editFormData.type === "creator_spotlight" ? (
+                                    <option value="user">Creator (User)</option>
+                                  ) : editFormData.type ===
+                                    "exclusive_recipes" ? (
+                                    <option value="recipe">
+                                      Exclusive Recipe
+                                    </option>
+                                  ) : (
+                                    <>
+                                      <option value="recipe">Recipe</option>
+                                      <option value="theme">Theme</option>
+                                    </>
+                                  )}
+                                </select>
+                              </div>
+
+                              <div>
+                                <label className="hsm-field-label">
+                                  {isGraphicBanner(editFormData.type)
+                                    ? "Linked Item (Optional)"
+                                    : "Select Content"}
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={openEditSelectModal}
+                                  className="hsm-btn w-100 justify-content-between"
+                                >
+                                  <span className="text-truncate">
+                                    {editItem.item_id
+                                      ? `${
+                                          getItemDisplayName(editItemPreview) ||
+                                          `ID #${editItem.item_id}`
+                                        }`
+                                      : `Choose ${editItem.item_type}...`}
+                                  </span>
+                                  <Search size={14} />
+                                </button>
+                              </div>
+
+                              <div>
+                                <label className="hsm-field-label">
+                                  Card Accent Color
+                                </label>
+                                <div className="hsm-color-row">
+                                  <input
+                                    type="color"
+                                    value={editItem.card_color}
+                                    onChange={(e) =>
+                                      setEditItem({
+                                        ...editItem,
+                                        card_color: e.target.value,
+                                      })
+                                    }
+                                    className="hsm-color-input"
+                                  />
+                                  <span className="hsm-section-sub">
+                                    {editItem.card_color.toUpperCase()}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {isGraphicBanner(editFormData.type) && (
+                              <div className="hsm-item-builder-grid">
+                                <div>
+                                  <label className="hsm-field-label">
+                                    Banner Artwork Upload
+                                  </label>
+                                  <div className="d-flex gap-2">
+                                    <input
+                                      type="file"
+                                      accept="image/*,video/*"
+                                      className="hsm-input"
+                                      onChange={(e) =>
+                                        setEditBannerFile(
+                                          e.target.files?.[0] || null
+                                        )
+                                      }
+                                    />
+                                    <button
+                                      type="button"
+                                      className="hsm-btn"
+                                      onClick={uploadEditBannerToCloudinary}
+                                      disabled={
+                                        uploadingEditBanner || !editBannerFile
+                                      }
+                                    >
+                                      {uploadingEditBanner
+                                        ? "Uploading..."
+                                        : "Upload"}
+                                    </button>
+                                  </div>
+                                  {editItem.image_url && (
+                                    <div className="hsm-type-hint text-truncate">
+                                      Uploaded: {editItem.image_url}
+                                    </div>
+                                  )}
+                                </div>
+
+                                <div>
+                                  <label className="hsm-field-label">
+                                    External Link URL{" "}
+                                    {!editItem.item_id &&
+                                      "(Required if no recipe linked)"}
+                                  </label>
+                                  <input
+                                    type="text"
+                                    placeholder="https://..."
+                                    value={editItem.link_url}
+                                    onChange={(e) =>
+                                      setEditItem({
+                                        ...editItem,
+                                        link_url: e.target.value,
+                                      })
+                                    }
+                                    className="hsm-input"
+                                  />
+                                </div>
+                              </div>
+                            )}
+
+                            {editItemPreview && (
+                              <div className="hsm-selected-preview">
+                                {getItemDisplayImage(editItemPreview) && (
                                   <img
-                                    src={item.item.image_url || item.item.profile_picture_url}
-                                    alt={item.item.name || item.item.themeName || item.item.creator_name}
-                                    style={{
-                                      width: "60px",
-                                      height: "60px",
-                                      objectFit: "cover",
-                                      borderRadius: "6px",
-                                      border: "1px solid #ddd",
-                                    }}
+                                    src={getItemDisplayImage(editItemPreview)}
+                                    alt={getItemDisplayName(editItemPreview)}
+                                    className="hsm-selected-thumb"
                                     onError={(e) => {
                                       e.target.style.display = "none";
-                                    }}
-                                  />
-                                )}
-                                {swatchColor && (
-                                  <div
-                                    style={{
-                                      width: "30px",
-                                      height: "30px",
-                                      backgroundColor: swatchColor,
-                                      border: "1px solid #ddd",
-                                      borderRadius: "4px",
                                     }}
                                   />
                                 )}
                                 <div>
-                                  <p className="mb-1 fw-bold">
-                                    {item.item?.name ||
-                                      item.item?.themeName ||
-                                      item.item?.creator_name ||
-                                      "Item #" + item.sectionItemId}
-                                  </p>
-                                  {item.item?.id && (
-                                    <p className="mb-0 small text-secondary">
-                                      ID: {item.item.id}
-                                    </p>
+                                  <div className="hsm-item-name">
+                                    {getItemDisplayName(editItemPreview)}
+                                  </div>
+                                  {editItemPreview.id && (
+                                    <div className="hsm-item-meta">
+                                      ID #{editItemPreview.id}
+                                    </div>
                                   )}
-                                  <p className="mb-0 small text-muted">
-                                    Section Item ID: {item.sectionItemId}
-                                  </p>
-                                  {item.imageUrl && (
-                                    <p className="mb-0 small text-muted">
-                                      Image: {item.imageUrl.slice(0, 50)}...
-                                    </p>
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="d-flex gap-2">
+                              <button
+                                type="button"
+                                onClick={addItemToEditSection}
+                                className="hsm-btn hsm-btn--sm hsm-btn--primary"
+                                disabled={
+                                  isGraphicBanner(editFormData.type)
+                                    ? !editItem.image_url ||
+                                      (!editItem.item_id && !editItem.link_url)
+                                    : !editItem.item_id
+                                }
+                              >
+                                <Save size={14} />
+                                <span>
+                                  {editingItemIndex !== null
+                                    ? "Update Item"
+                                    : "Confirm Item"}
+                                </span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setShowEditItemForm(false);
+                                  setEditingItemIndex(null);
+                                  setEditItemPreview(null);
+                                }}
+                                className="hsm-btn hsm-btn--sm"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {editFormData.items && editFormData.items.length > 0 ? (
+                          <div className="hsm-items-grid">
+                            {editFormData.items.map((item, idx) => {
+                              let originalItem = null;
+                              if (section.items && section.items.length > 0) {
+                                const found = section.items.find((original) => {
+                                  if (
+                                    item.section_item_id &&
+                                    original.sectionItemId
+                                  ) {
+                                    return (
+                                      original.sectionItemId ===
+                                      item.section_item_id
+                                    );
+                                  }
+                                  if (item.item_id && original.item?.id) {
+                                    return original.item.id === item.item_id;
+                                  }
+                                  return false;
+                                });
+                                if (found) originalItem = found.item;
+                              }
+
+                              const displayName =
+                                item._previewName ||
+                                getItemDisplayName(originalItem) ||
+                                (item.item_id
+                                  ? `${item.item_type} #${item.item_id}`
+                                  : "Banner Item");
+
+                              const displayImg =
+                                item._previewImage ||
+                                getItemDisplayImage(
+                                  originalItem,
+                                  item.image_url
+                                );
+
+                              const swatchColor = argbIntToHex(item.card_color);
+                              const isDragged = draggedItemIdx === idx;
+                              const isDragOver = dragOverItemIdx === idx;
+                              const isCurrentlyEditingThisItem =
+                                editingItemIndex === idx && showEditItemForm;
+
+                              return (
+                                <div
+                                  key={`${
+                                    item.section_item_id ??
+                                    item.item_id ??
+                                    "noid"
+                                  }-${idx}`}
+                                  draggable
+                                  onDragStart={(e) => {
+                                    e.stopPropagation();
+                                    setDraggedItemIdx(idx);
+                                  }}
+                                  onDragOver={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    if (dragOverItemIdx !== idx)
+                                      setDragOverItemIdx(idx);
+                                  }}
+                                  onDrop={(e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    handleEditItemDrop(idx);
+                                  }}
+                                  onDragEnd={(e) => {
+                                    e.stopPropagation();
+                                    setDraggedItemIdx(null);
+                                    setDragOverItemIdx(null);
+                                  }}
+                                  className={`hsm-item-card hsm-item-card--draggable ${
+                                    isDragged ? "hsm-item-card--dragging" : ""
+                                  } ${
+                                    isDragOver ? "hsm-item-card--dragover" : ""
+                                  } ${
+                                    isCurrentlyEditingThisItem
+                                      ? "hsm-item-card--editing"
+                                      : ""
+                                  }`}
+                                >
+                                  <div className="hsm-item-card-left">
+                                    <span
+                                      className="hsm-drag-grip"
+                                      title="Drag to reorder item"
+                                    >
+                                      <GripVertical size={15} />
+                                    </span>
+                                    {displayImg ? (
+                                      <img
+                                        src={displayImg}
+                                        alt={displayName}
+                                        className="hsm-item-thumb"
+                                        onError={(e) => {
+                                          e.target.style.display = "none";
+                                        }}
+                                      />
+                                    ) : (
+                                      <div className="hsm-item-thumb-placeholder">
+                                        <ImageIcon size={17} />
+                                      </div>
+                                    )}
+                                    <div className="hsm-item-info">
+                                      <div
+                                        className="hsm-item-name"
+                                        title={displayName}
+                                      >
+                                        {displayName}
+                                      </div>
+                                      <div className="hsm-item-meta">
+                                        <span>{item.item_type}</span>
+                                        {item.item_id && (
+                                          <span>• ID #{item.item_id}</span>
+                                        )}
+                                        <label
+                                          className="hsm-inline-color-picker"
+                                          title="Click to change this item's card color"
+                                          onClick={(e) => e.stopPropagation()}
+                                        >
+                                          <input
+                                            type="color"
+                                            value={swatchColor || "#FF5733"}
+                                            onChange={(e) => {
+                                              const nextHex = e.target.value;
+                                              const newColorInt =
+                                                hexToArgbInt(nextHex);
+                                              setEditFormData((prev) => {
+                                                const updatedItems = [
+                                                  ...(prev.items || []),
+                                                ];
+                                                if (updatedItems[idx]) {
+                                                  updatedItems[idx] = {
+                                                    ...updatedItems[idx],
+                                                    card_color: newColorInt,
+                                                  };
+                                                }
+                                                return {
+                                                  ...prev,
+                                                  items: updatedItems,
+                                                };
+                                              });
+                                              if (editingItemIndex === idx) {
+                                                setEditItem((prev) => ({
+                                                  ...prev,
+                                                  card_color: nextHex,
+                                                }));
+                                              }
+                                            }}
+                                            className="hsm-inline-color-input"
+                                          />
+                                          <span
+                                            className="hsm-swatch hsm-swatch--interactive"
+                                            style={{
+                                              backgroundColor:
+                                                swatchColor || "#cbd5e1",
+                                            }}
+                                          />
+                                          <span className="hsm-inline-color-hex">
+                                            {swatchColor
+                                              ? swatchColor.toUpperCase()
+                                              : "Color"}
+                                          </span>
+                                        </label>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  <div className="d-flex gap-1">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingItemIndex(idx);
+                                        setEditItem({
+                                          item_type:
+                                            editFormData.type ===
+                                            "creator_spotlight"
+                                              ? "user"
+                                              : item.item_type || "recipe",
+                                          item_id:
+                                            item.item_id?.toString() || "",
+                                          card_color: swatchColor || "#FF5733",
+                                          image_url: item.image_url || "",
+                                          link_url: item.link_url || "",
+                                        });
+                                        setEditItemPreview(
+                                          originalItem || null
+                                        );
+                                        setShowEditItemForm(true);
+                                        setTimeout(() => {
+                                          editItemFormRef.current?.scrollIntoView(
+                                            {
+                                              behavior: "smooth",
+                                              block: "nearest",
+                                            }
+                                          );
+                                        }, 50);
+                                      }}
+                                      className="hsm-btn hsm-btn--icon"
+                                      title="Edit item"
+                                    >
+                                      <Edit2 size={13} />
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        removeItemFromEditSection(idx)
+                                      }
+                                      className="hsm-btn hsm-btn--icon hsm-btn--danger"
+                                      title="Remove item"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="hsm-section-sub">
+                            No items in this section.
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="d-flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => updateSection(section.id)}
+                          className="hsm-btn hsm-btn--primary"
+                          disabled={loading}
+                        >
+                          <Save size={15} />
+                          <span>{loading ? "Saving..." : "Save Changes"}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={closeSectionDrawerOrEdit}
+                          className="hsm-btn"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Expanded Read-Only Items Drawer */}
+                  {isExpanded && !isEditing && (
+                    <div className="hsm-section-drawer">
+                      <div className="hsm-drawer-top">
+                        <h3 className="hsm-drawer-title">
+                          Curated Items ({itemsList.length})
+                        </h3>
+                        <div className="d-flex gap-2">
+                          <button
+                            type="button"
+                            className="hsm-btn hsm-btn--sm"
+                            onClick={() => startEditingSection(section)}
+                          >
+                            <Edit2 size={13} />
+                            <span>Edit Section & Items</span>
+                          </button>
+                          <button
+                            type="button"
+                            className="hsm-btn hsm-btn--sm"
+                            onClick={() => setExpandedId(null)}
+                          >
+                            <X size={13} />
+                            <span>Close</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {itemsList.length === 0 ? (
+                        <div className="hsm-section-sub">
+                          No items configured in this section.
+                        </div>
+                      ) : (
+                        <div className="hsm-items-grid">
+                          {itemsList.map((item, idx) => {
+                            const rawColor = extractItemColorRaw(item);
+                            const swatchColor = argbIntToHex(rawColor);
+                            const name =
+                              getItemDisplayName(item.item) ||
+                              `Item #${item.sectionItemId}`;
+                            const thumb = getItemDisplayImage(
+                              item.item,
+                              item.imageUrl
+                            );
+                            const linkTarget = item.linkUrl || item.link_url;
+
+                            return (
+                              <div
+                                key={`${item.sectionItemId ?? "sid"}-${idx}`}
+                                className="hsm-item-card"
+                              >
+                                <div className="hsm-item-card-left">
+                                  {thumb ? (
+                                    <img
+                                      src={thumb}
+                                      alt={name}
+                                      className="hsm-item-thumb"
+                                      onError={(e) => {
+                                        e.target.style.display = "none";
+                                      }}
+                                    />
+                                  ) : (
+                                    <div className="hsm-item-thumb-placeholder">
+                                      <ImageIcon size={17} />
+                                    </div>
                                   )}
-                                  {(item.linkUrl || item.link_url) && (
-                                    <p className="mb-0 small text-muted">
-                                      Link:{" "}
-                                      {(item.linkUrl || item.link_url).slice(
-                                        0,
-                                        50,
+                                  <div className="hsm-item-info">
+                                    <div className="hsm-item-name" title={name}>
+                                      {name}
+                                    </div>
+                                    <div className="hsm-item-meta">
+                                      {item.item?.id && (
+                                        <span>ID #{item.item.id}</span>
                                       )}
-                                      ...
-                                    </p>
-                                  )}
+                                      {item.item?.total_recipes !==
+                                        undefined && (
+                                        <span>
+                                          • {item.item.total_recipes} recipes
+                                        </span>
+                                      )}
+                                      {swatchColor && (
+                                        <span
+                                          className="hsm-swatch"
+                                          style={{
+                                            backgroundColor: swatchColor,
+                                          }}
+                                          title={`Color: ${swatchColor}`}
+                                        />
+                                      )}
+                                    </div>
+                                  </div>
                                 </div>
-                              </div>
-                              <span className="badge bg-success">Active</span>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-        </div>
 
-        {/* End Stats (moved to top) */}
-
-        {/* Select Item Modal (Create Mode) */}
-        {showSelectModal && (
-          <div
-            className="modal show d-block"
-            tabIndex="-1"
-            style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
-          >
-            <div className="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
-              <div className="modal-content">
-                <div className="modal-header">
-                  <h5 className="modal-title">
-                    Select {newItem.item_type === "recipe" ? "Recipe" : "Theme"}
-                  </h5>
-                  <button
-                    type="button"
-                    className="btn-close"
-                    onClick={() => setShowSelectModal(false)}
-                  ></button>
-                </div>
-                <div className="modal-body">
-                  {newItem.item_type === "recipe" && (
-                    <div className="mb-3">
-                      <div className="input-group">
-                        <input
-                          type="text"
-                          placeholder="Search by name..."
-                          value={recipesSearchInput}
-                          onChange={(e) =>
-                            setRecipesSearchInput(e.target.value)
-                          }
-                          onKeyPress={(e) => {
-                            if (e.key === "Enter") handleRecipesSearch();
-                          }}
-                          className="form-control"
-                        />
-                        <button
-                          onClick={handleRecipesSearch}
-                          className="btn btn-primary"
-                          type="button"
-                        >
-                          <Search size={18} />
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {loadingItems ? (
-                    <div className="text-center py-5">
-                      <div className="spinner-border" role="status">
-                        <span className="visually-hidden">Loading...</span>
-                      </div>
-                    </div>
-                  ) : availableItems.length === 0 ? (
-                    <div className="text-center py-5 text-muted">
-                      No {newItem.item_type}s found
-                    </div>
-                  ) : (
-                    <div className="row g-3">
-                      {availableItems.map((item) => (
-                        <div key={item.id} className="col-12">
-                          <div
-                            className="card cursor-pointer"
-                            onClick={() => selectItemFromModal(item)}
-                            style={{
-                              cursor: "pointer",
-                              transition: "all 0.2s",
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.transform = "scale(1.02)";
-                              e.currentTarget.style.boxShadow =
-                                "0 4px 8px rgba(0,0,0,0.15)";
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.transform = "scale(1)";
-                              e.currentTarget.style.boxShadow = "none";
-                            }}
-                          >
-                            <div className="card-body">
-                              <div className="d-flex align-items-center gap-3">
-                                {(item.image_url || item.profile_picture_url) && (
-                                  <img
-                                    src={item.image_url || item.profile_picture_url}
-                                    alt={item.name || item.themeName || item.creator_name}
-                                    style={{
-                                      width: "80px",
-                                      height: "80px",
-                                      objectFit: "cover",
-                                      borderRadius: "8px",
-                                      flexShrink: 0,
-                                    }}
-                                    onError={(e) => {
-                                      e.target.style.display = "none";
-                                    }}
-                                  />
+                                {linkTarget && (
+                                  <a
+                                    href={linkTarget}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="hsm-btn hsm-btn--icon"
+                                    title={linkTarget}
+                                  >
+                                    <ExternalLink size={14} />
+                                  </a>
                                 )}
-                                <div className="flex-grow-1">
-                                  <h6 className="mb-1">
-                                    {item.name || item.themeName || item.creator_name}
-                                  </h6>
-                                  <p className="mb-0 small text-muted">
-                                    ID: {item.id}
-                                  </p>
-                                  {item.description && (
-                                    <p className="mb-0 small text-secondary mt-1">
-                                      {item.description.slice(0, 100)}
-                                      {item.description.length > 100 && "..."}
-                                    </p>
-                                  )}
-                                </div>
                               </div>
-                            </div>
-                          </div>
+                            );
+                          })}
                         </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {newItem.item_type === "recipe" && recipesTotalPages > 1 && (
-                    <div className="d-flex justify-content-center align-items-center gap-3 mt-4">
-                      <button
-                        onClick={() =>
-                          setRecipesPage((prev) => Math.max(1, prev - 1))
-                        }
-                        disabled={recipesPage === 1}
-                        className="btn btn-outline-secondary"
-                      >
-                        <ChevronLeft size={18} />
-                      </button>
-                      <span>
-                        Page {recipesPage} of {recipesTotalPages}
-                      </span>
-                      <button
-                        onClick={() =>
-                          setRecipesPage((prev) =>
-                            Math.min(recipesTotalPages, prev + 1),
-                          )
-                        }
-                        disabled={recipesPage === recipesTotalPages}
-                        className="btn btn-outline-secondary"
-                      >
-                        <ChevronRight size={18} />
-                      </button>
+                      )}
                     </div>
                   )}
                 </div>
-                <div className="modal-footer">
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => setShowSelectModal(false)}
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Edit Modal */}
-        {showEditSelectModal && (
-          <div
-            className="modal show d-block"
-            tabIndex="-1"
-            style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
-          >
-            <div className="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
-              <div className="modal-content">
-                <div className="modal-header">
-                  <h5 className="modal-title">
-                    Select{" "}
-                    {editItem.item_type === "recipe" ? "Recipe" : "Theme"}
-                  </h5>
-                  <button
-                    type="button"
-                    className="btn-close"
-                    onClick={() => setShowEditSelectModal(false)}
-                  ></button>
-                </div>
-                <div className="modal-body">
-                  {editItem.item_type === "recipe" && (
-                    <div className="mb-3">
-                      <div className="input-group">
-                        <input
-                          type="text"
-                          placeholder="Search by name..."
-                          value={editRecipesSearchInput}
-                          onChange={(e) =>
-                            setEditRecipesSearchInput(e.target.value)
-                          }
-                          onKeyPress={(e) => {
-                            if (e.key === "Enter") handleEditRecipesSearch();
-                          }}
-                          className="form-control"
-                        />
-                        <button
-                          onClick={handleEditRecipesSearch}
-                          className="btn btn-primary"
-                          type="button"
-                        >
-                          <Search size={18} />
-                        </button>
-                      </div>
-                    </div>
-                  )}
-
-                  {loadingEditItems ? (
-                    <div className="text-center py-5">
-                      <div className="spinner-border" role="status">
-                        <span className="visually-hidden">Loading...</span>
-                      </div>
-                    </div>
-                  ) : editAvailableItems.length === 0 ? (
-                    <div className="text-center py-5 text-muted">
-                      No {editItem.item_type}s found
-                    </div>
-                  ) : (
-                    <div className="row g-3">
-                      {editAvailableItems.map((item) => (
-                        <div key={item.id} className="col-12">
-                          <div
-                            className="card cursor-pointer"
-                            onClick={() => selectEditItemFromModal(item)}
-                            style={{
-                              cursor: "pointer",
-                              transition: "all 0.2s",
-                            }}
-                            onMouseEnter={(e) => {
-                              e.currentTarget.style.transform = "scale(1.02)";
-                              e.currentTarget.style.boxShadow =
-                                "0 4px 8px rgba(0,0,0,0.15)";
-                            }}
-                            onMouseLeave={(e) => {
-                              e.currentTarget.style.transform = "scale(1)";
-                              e.currentTarget.style.boxShadow = "none";
-                            }}
-                          >
-                            <div className="card-body">
-                              <div className="d-flex align-items-center gap-3">
-                                {(item.image_url || item.profile_picture_url) && (
-                                  <img
-                                    src={item.image_url || item.profile_picture_url}
-                                    alt={item.name || item.themeName || item.creator_name}
-                                    style={{
-                                      width: "80px",
-                                      height: "80px",
-                                      objectFit: "cover",
-                                      borderRadius: "8px",
-                                      flexShrink: 0,
-                                    }}
-                                    onError={(e) => {
-                                      e.target.style.display = "none";
-                                    }}
-                                  />
-                                )}
-                                <div className="flex-grow-1">
-                                  <h6 className="mb-1">
-                                    {item.name || item.themeName || item.creator_name}
-                                  </h6>
-                                  <p className="mb-0 small text-muted">
-                                    ID: {item.id}
-                                  </p>
-                                  {item.description && (
-                                    <p className="mb-0 small text-secondary mt-1">
-                                      {item.description.slice(0, 100)}
-                                      {item.description.length > 100 && "..."}
-                                    </p>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {editItem.item_type === "recipe" &&
-                    editRecipesTotalPages > 1 && (
-                      <div className="d-flex justify-content-center align-items-center gap-3 mt-4">
-                        <button
-                          onClick={() =>
-                            setEditRecipesPage((prev) => Math.max(1, prev - 1))
-                          }
-                          disabled={editRecipesPage === 1}
-                          className="btn btn-outline-secondary"
-                        >
-                          <ChevronLeft size={18} />
-                        </button>
-                        <span>
-                          Page {editRecipesPage} of {editRecipesTotalPages}
-                        </span>
-                        <button
-                          onClick={() =>
-                            setEditRecipesPage((prev) =>
-                              Math.min(editRecipesTotalPages, prev + 1),
-                            )
-                          }
-                          disabled={editRecipesPage === editRecipesTotalPages}
-                          className="btn btn-outline-secondary"
-                        >
-                          <ChevronRight size={18} />
-                        </button>
-                      </div>
-                    )}
-                </div>
-                <div className="modal-footer">
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => setShowEditSelectModal(false)}
-                  >
-                    Close
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Confirm Delete Modal */}
-        {showConfirm && (
-          <div
-            className="modal show d-block"
-            tabIndex="-1"
-            style={{ backgroundColor: "rgba(0,0,0,0.5)" }}
-          >
-            <div className="modal-dialog modal-dialog-centered">
-              <div className="modal-content">
-                <div className="modal-header">
-                  <h5 className="modal-title">Confirm Deletion</h5>
-                  <button
-                    type="button"
-                    className="btn-close"
-                    onClick={cancelDelete}
-                  ></button>
-                </div>
-                <div className="modal-body">
-                  <p>Are you sure you want to delete this section?</p>
-                </div>
-                <div className="modal-footer">
-                  <button
-                    onClick={confirmDelete}
-                    disabled={loading}
-                    className="btn btn-danger"
-                  >
-                    {loading ? "Deleting..." : "Yes, Delete"}
-                  </button>
-                  <button
-                    onClick={cancelDelete}
-                    disabled={loading}
-                    className="btn btn-secondary"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
+              );
+            })}
+          </>
         )}
       </div>
+
+      {/* Item Picker Modal (Create Mode) */}
+      {showSelectModal && (
+        <div
+          className="hsm-modal-backdrop"
+          onClick={() => setShowSelectModal(false)}
+        >
+          <div className="hsm-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="hsm-modal-header">
+              <h3 className="hsm-modal-title">
+                Select{" "}
+                {newItem.item_type === "user"
+                  ? "Creator"
+                  : newItem.item_type === "theme"
+                    ? "Theme"
+                    : "Recipe"}
+              </h3>
+              <button
+                type="button"
+                className="hsm-btn hsm-btn--icon"
+                onClick={() => setShowSelectModal(false)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="hsm-modal-body">
+              {(newItem.item_type === "recipe" ||
+                newItem.item_type === "user") && (
+                <div className="d-flex gap-2 mb-3">
+                  <input
+                    type="search"
+                    placeholder={`Search ${
+                      newItem.item_type === "user" ? "creators" : "recipes"
+                    } by name...`}
+                    value={recipesSearchInput}
+                    onChange={(e) => setRecipesSearchInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleRecipesSearch();
+                    }}
+                    className="hsm-input"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleRecipesSearch}
+                    className="hsm-btn hsm-btn--primary"
+                  >
+                    <Search size={15} />
+                    <span>Search</span>
+                  </button>
+                </div>
+              )}
+
+              {loadingItems ? (
+                <div className="hsm-picker-grid">
+                  {[1, 2, 3, 4, 5, 6].map((n) => (
+                    <div key={n} className="hsm-picker-item">
+                      <div
+                        className="shimmer"
+                        style={{ width: 48, height: 48, borderRadius: 6 }}
+                      />
+                      <div style={{ flex: 1 }}>
+                        <div
+                          className="shimmer"
+                          style={{ width: "75%", height: 14, marginBottom: 8 }}
+                        />
+                        <div
+                          className="shimmer"
+                          style={{ width: "40%", height: 12 }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : availableItems.length === 0 ? (
+                <div className="hsm-empty-state">No matching items found.</div>
+              ) : (
+                <div className="hsm-picker-grid">
+                  {availableItems.map((item) => {
+                    const img = getItemDisplayImage(item);
+                    const title = getItemDisplayName(item);
+                    return (
+                      <button
+                        type="button"
+                        key={item.id}
+                        className="hsm-picker-item"
+                        onClick={() => selectItemFromModal(item)}
+                      >
+                        {img ? (
+                          <img
+                            src={img}
+                            alt={title}
+                            className="hsm-picker-thumb"
+                            onError={(e) => {
+                              e.target.style.display = "none";
+                            }}
+                          />
+                        ) : (
+                          <div className="hsm-item-thumb-placeholder">
+                            <ImageIcon size={17} />
+                          </div>
+                        )}
+                        <div className="hsm-item-info">
+                          <div className="hsm-item-name">{title}</div>
+                          <div className="hsm-item-meta">
+                            <span>ID #{item.id}</span>
+                            {item.total_recipes !== undefined && (
+                              <span>• {item.total_recipes} recipes</span>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="hsm-modal-footer">
+              {(newItem.item_type === "recipe" ||
+                newItem.item_type === "user") &&
+              recipesTotalPages > 1 ? (
+                <div className="d-flex align-items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setRecipesPage((prev) => Math.max(1, prev - 1))
+                    }
+                    disabled={recipesPage === 1}
+                    className="hsm-btn hsm-btn--sm"
+                  >
+                    <ChevronLeft size={15} />
+                    <span>Prev</span>
+                  </button>
+                  <span className="hsm-section-sub">
+                    Page {recipesPage} of {recipesTotalPages}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setRecipesPage((prev) =>
+                        Math.min(recipesTotalPages, prev + 1)
+                      )
+                    }
+                    disabled={recipesPage === recipesTotalPages}
+                    className="hsm-btn hsm-btn--sm"
+                  >
+                    <span>Next</span>
+                    <ChevronRight size={15} />
+                  </button>
+                </div>
+              ) : (
+                <div />
+              )}
+
+              <button
+                type="button"
+                className="hsm-btn"
+                onClick={() => setShowSelectModal(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Item Picker Modal (Edit Mode) */}
+      {showEditSelectModal && (
+        <div
+          className="hsm-modal-backdrop"
+          onClick={() => setShowEditSelectModal(false)}
+        >
+          <div className="hsm-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="hsm-modal-header">
+              <h3 className="hsm-modal-title">
+                Select{" "}
+                {editItem.item_type === "user"
+                  ? "Creator"
+                  : editItem.item_type === "theme"
+                    ? "Theme"
+                    : "Recipe"}
+              </h3>
+              <button
+                type="button"
+                className="hsm-btn hsm-btn--icon"
+                onClick={() => setShowEditSelectModal(false)}
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="hsm-modal-body">
+              {(editItem.item_type === "recipe" ||
+                editItem.item_type === "user") && (
+                <div className="d-flex gap-2 mb-3">
+                  <input
+                    type="search"
+                    placeholder={`Search ${
+                      editItem.item_type === "user" ? "creators" : "recipes"
+                    } by name...`}
+                    value={editRecipesSearchInput}
+                    onChange={(e) => setEditRecipesSearchInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleEditRecipesSearch();
+                    }}
+                    className="hsm-input"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleEditRecipesSearch}
+                    className="hsm-btn hsm-btn--primary"
+                  >
+                    <Search size={15} />
+                    <span>Search</span>
+                  </button>
+                </div>
+              )}
+
+              {loadingEditItems ? (
+                <div className="hsm-picker-grid">
+                  {[1, 2, 3, 4, 5, 6].map((n) => (
+                    <div key={n} className="hsm-picker-item">
+                      <div
+                        className="shimmer"
+                        style={{ width: 48, height: 48, borderRadius: 6 }}
+                      />
+                      <div style={{ flex: 1 }}>
+                        <div
+                          className="shimmer"
+                          style={{ width: "75%", height: 14, marginBottom: 8 }}
+                        />
+                        <div
+                          className="shimmer"
+                          style={{ width: "40%", height: 12 }}
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : editAvailableItems.length === 0 ? (
+                <div className="hsm-empty-state">No matching items found.</div>
+              ) : (
+                <div className="hsm-picker-grid">
+                  {editAvailableItems.map((item) => {
+                    const img = getItemDisplayImage(item);
+                    const title = getItemDisplayName(item);
+                    return (
+                      <button
+                        type="button"
+                        key={item.id}
+                        className="hsm-picker-item"
+                        onClick={() => selectEditItemFromModal(item)}
+                      >
+                        {img ? (
+                          <img
+                            src={img}
+                            alt={title}
+                            className="hsm-picker-thumb"
+                            onError={(e) => {
+                              e.target.style.display = "none";
+                            }}
+                          />
+                        ) : (
+                          <div className="hsm-item-thumb-placeholder">
+                            <ImageIcon size={17} />
+                          </div>
+                        )}
+                        <div className="hsm-item-info">
+                          <div className="hsm-item-name">{title}</div>
+                          <div className="hsm-item-meta">
+                            <span>ID #{item.id}</span>
+                            {item.total_recipes !== undefined && (
+                              <span>• {item.total_recipes} recipes</span>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="hsm-modal-footer">
+              {(editItem.item_type === "recipe" ||
+                editItem.item_type === "user") &&
+              editRecipesTotalPages > 1 ? (
+                <div className="d-flex align-items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditRecipesPage((prev) => Math.max(1, prev - 1))
+                    }
+                    disabled={editRecipesPage === 1}
+                    className="hsm-btn hsm-btn--sm"
+                  >
+                    <ChevronLeft size={15} />
+                    <span>Prev</span>
+                  </button>
+                  <span className="hsm-section-sub">
+                    Page {editRecipesPage} of {editRecipesTotalPages}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditRecipesPage((prev) =>
+                        Math.min(editRecipesTotalPages, prev + 1)
+                      )
+                    }
+                    disabled={editRecipesPage === editRecipesTotalPages}
+                    className="hsm-btn hsm-btn--sm"
+                  >
+                    <span>Next</span>
+                    <ChevronRight size={15} />
+                  </button>
+                </div>
+              ) : (
+                <div />
+              )}
+
+              <button
+                type="button"
+                className="hsm-btn"
+                onClick={() => setShowEditSelectModal(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Confirm Delete Modal */}
+      {showConfirm && (
+        <div className="hsm-modal-backdrop" onClick={cancelDelete}>
+          <div
+            className="hsm-modal hsm-modal--sm"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="hsm-modal-header">
+              <h3 className="hsm-modal-title">Delete Home Section</h3>
+              <button
+                type="button"
+                className="hsm-btn hsm-btn--icon"
+                onClick={cancelDelete}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="hsm-modal-body">
+              <p className="mb-0" style={{ fontSize: 14, color: "#475569" }}>
+                Are you sure you want to permanently delete this section from
+                the home screen? This action cannot be undone.
+              </p>
+            </div>
+            <div className="hsm-modal-footer justify-content-end">
+              <button
+                type="button"
+                onClick={cancelDelete}
+                disabled={loading}
+                className="hsm-btn"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDelete}
+                disabled={loading}
+                className="hsm-btn hsm-btn--danger-solid"
+              >
+                {loading ? "Deleting..." : "Delete Section"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
 export default HomeSectionAdmin;
-//njj
