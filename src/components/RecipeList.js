@@ -294,6 +294,27 @@ const RecipeList = () => {
   }, [statusMsg]);
 
   // Helper to build a valid PUT payload for any recipe object
+  // Turns an upload/save error into a short, readable reason for the status banner
+  const describeSaveError = (err) => {
+    const res = err?.response;
+    if (!res) return err?.message || "Unknown error";
+    const data = res.data;
+    let detail = "";
+    if (typeof data === "string") {
+      detail = data.slice(0, 160);
+    } else if (data && typeof data === "object") {
+      detail =
+        data.message ||
+        data.detail ||
+        Object.entries(data.errors || data)
+          .filter(([k]) => k !== "isSuccessful")
+          .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(", ") : JSON.stringify(v)}`)
+          .join("; ")
+          .slice(0, 220);
+    }
+    return `Server rejected the save (HTTP ${res.status})${detail ? ` — ${detail}` : ""}`;
+  };
+
   const buildRecipePutPayload = async (recipeLike, overrides = {}) => {
     let base = recipeLike;
     if (!base.ingredients || !base.steps) {
@@ -901,7 +922,7 @@ const RecipeList = () => {
       console.error("Quick photo update failed:", err);
       setStatusMsg({
         type: "danger",
-        text: `Failed to update photo for "${target.name}".`,
+        text: `Failed to update photo for "${target.name}": ${describeSaveError(err)}`,
       });
     } finally {
       endMutation();
