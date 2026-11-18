@@ -3,18 +3,18 @@
 // Unsigned Cloudinary uploads. Only the cloud name and an *unsigned* upload
 // preset are needed in the browser — no API key or secret is shipped to users.
 // Configure in .env:
-//   REACT_APP_CLOUDINARY_CLOUD_NAME=day9iwtpb
-//   REACT_APP_CLOUDINARY_UPLOAD_PRESET=cookeaze_admin
+//   REACT_APP_CLOUDINARY_UPLOAD_CLOUD=day9iwtpb
+//   REACT_APP_CLOUDINARY_UPLOAD_PRESET_NAME=cookeaze_admin
 
 const DEFAULT_CLOUD_NAME = "day9iwtpb";
 const DEFAULT_UPLOAD_PRESET = "cookeaze_admin";
 
 class CloudinaryService {
   cloudName =
-    (process.env.REACT_APP_CLOUDINARY_CLOUD_NAME || "").trim() ||
+    (process.env.REACT_APP_CLOUDINARY_UPLOAD_CLOUD || "").trim() ||
     DEFAULT_CLOUD_NAME;
   uploadPreset =
-    (process.env.REACT_APP_CLOUDINARY_UPLOAD_PRESET || "").trim() ||
+    (process.env.REACT_APP_CLOUDINARY_UPLOAD_PRESET_NAME || "").trim() ||
     DEFAULT_UPLOAD_PRESET;
   lastError = null;
 
