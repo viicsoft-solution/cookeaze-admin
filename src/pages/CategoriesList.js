@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
-import axios from "axios";
 import {
   Search,
   Plus,
@@ -20,11 +19,10 @@ import {
   FolderKanban,
 } from "lucide-react";
 import { getAxiosInstance } from "../api";
+import CloudinaryService from "../components/cloudinaryService";
 import { normalizeFoodImage, deduplicateGalleryItems } from "./Imagelibrary";
 import "./Categories.css";
 
-const CLOUD_NAME = "djlc333s2";
-const UPLOAD_PRESET = "food-admin";
 const CATALOG_CACHE_KEY = "cookeaze_recipes_catalog_v5";
 
 export default function CategoriesList() {
@@ -197,19 +195,13 @@ export default function CategoriesList() {
     if (!file) return;
     setUploadingCover(true);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("upload_preset", UPLOAD_PRESET);
-      const res = await axios.post(
-        `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
-        fd
-      );
-      if (res.data?.secure_url) {
-        setFormImageUrl(res.data.secure_url);
-        showToast("success", "Cover image uploaded.");
-      }
-    } catch {
-      showToast("error", "Image upload failed. Please try again.");
+      const uploadedUrl = await CloudinaryService.uploadFile(file, {
+        folder: "cookeaze_categories",
+      });
+      setFormImageUrl(uploadedUrl);
+      showToast("success", "Cover image uploaded.");
+    } catch (err) {
+      showToast("error", err?.message || "Image upload failed. Please try again.");
     } finally {
       setUploadingCover(false);
       e.target.value = "";
@@ -270,15 +262,9 @@ export default function CategoriesList() {
 
     setQuickUploadingId(targetCat.id);
     try {
-      const fd = new FormData();
-      fd.append("file", file);
-      fd.append("upload_preset", UPLOAD_PRESET);
-      const uploadRes = await axios.post(
-        `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
-        fd
-      );
-      const imageUrl = uploadRes.data?.secure_url;
-      if (!imageUrl) throw new Error("No URL returned");
+      const imageUrl = await CloudinaryService.uploadFile(file, {
+        folder: "cookeaze_categories",
+      });
 
       await api.put(`/categories/${targetCat.id}/`, {
         category_name: targetCat.category_name || targetCat.displayName,

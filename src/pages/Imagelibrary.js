@@ -1074,7 +1074,7 @@ export default function ImageLibrary() {
           const file = files[i];
           let finalUrl = "";
           try {
-            if (CloudinaryService.cloudName && CloudinaryService.apiKey) {
+            if (CloudinaryService.isConfigured()) {
               const cloudUrl = await CloudinaryService.uploadMedia(file, {
                 folder: "cookeaze_image_library",
               });
@@ -1179,7 +1179,7 @@ export default function ImageLibrary() {
     setReplacingId(target.id);
     try {
       let newUrl = "";
-      if (CloudinaryService.cloudName && CloudinaryService.apiKey) {
+      if (CloudinaryService.isConfigured()) {
         const uploaded = await CloudinaryService.uploadMedia(file, {
           folder: "cookeaze_image_library",
         });
@@ -2796,7 +2796,7 @@ function AssetDetailModal({
     setUploadingReplace(true);
     try {
       let nextUrl = "";
-      if (CloudinaryService.cloudName && CloudinaryService.apiKey) {
+      if (CloudinaryService.isConfigured()) {
         const uploaded = await CloudinaryService.uploadMedia(file, {
           folder: "cookeaze_image_library",
         });

@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate, useParams, Link } from "react-router-dom";
-import axios from "axios";
 import {
   ArrowLeft,
   Upload,
@@ -10,11 +9,10 @@ import {
   X,
 } from "lucide-react";
 import { getAxiosInstance } from "../api";
+import CloudinaryService from "../components/cloudinaryService";
 import { normalizeFoodImage, deduplicateGalleryItems } from "./Imagelibrary";
 import "./Categories.css";
 
-const CLOUD_NAME = "djlc333s2";
-const UPLOAD_PRESET = "food-admin";
 const CATALOG_CACHE_KEY = "cookeaze_recipes_catalog_v5";
 
 export default function CategoryForm() {
@@ -59,19 +57,12 @@ export default function CategoryForm() {
     setError(null);
 
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-      formData.append("upload_preset", UPLOAD_PRESET);
-
-      const res = await axios.post(
-        `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
-        formData
-      );
-      if (res.data?.secure_url) {
-        setImageUrl(res.data.secure_url);
-      }
-    } catch {
-      setError("Failed to upload image. Please try again.");
+      const uploadedUrl = await CloudinaryService.uploadFile(file, {
+        folder: "cookeaze_categories",
+      });
+      setImageUrl(uploadedUrl);
+    } catch (err) {
+      setError(err?.message || "Failed to upload image. Please try again.");
     } finally {
       setUploading(false);
       e.target.value = "";

@@ -301,7 +301,7 @@ export default function RecipeCreate() {
       showBanner("Image uploaded.");
     } catch (err) {
       console.error("Image upload error:", err);
-      showBanner("Failed to upload image.", "error");
+      showBanner(err?.message || "Failed to upload image.", "error");
     } finally {
       setUploadingImage(false);
       e.target.value = "";

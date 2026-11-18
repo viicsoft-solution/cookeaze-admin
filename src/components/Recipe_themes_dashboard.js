@@ -351,7 +351,7 @@ export default function RecipeThemesDashboard() {
     setUploadingCover(true);
     try {
       let uploadedUrl = "";
-      if (CloudinaryService.cloudName && CloudinaryService.apiKey) {
+      if (CloudinaryService.isConfigured()) {
         uploadedUrl = await CloudinaryService.uploadMedia(file, {
           folder: "cookeaze_themes",
         });

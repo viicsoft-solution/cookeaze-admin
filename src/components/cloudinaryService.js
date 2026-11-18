@@ -1,59 +1,78 @@
-// src/services/CloudinaryService.js
-import sha1 from "js-sha1";
+// src/components/cloudinaryService.js
+//
+// Unsigned Cloudinary uploads. Only the cloud name and an *unsigned* upload
+// preset are needed in the browser — no API key or secret is shipped to users.
+// Configure in .env:
+//   REACT_APP_CLOUDINARY_CLOUD_NAME=day9iwtpb
+//   REACT_APP_CLOUDINARY_UPLOAD_PRESET=cookeaze_admin
+
+const DEFAULT_CLOUD_NAME = "day9iwtpb";
+const DEFAULT_UPLOAD_PRESET = "cookeaze_admin";
 
 class CloudinaryService {
-  cloudName = process.env.REACT_APP_CLOUDINARY_CLOUD_NAME ?? "";
-  apiKey = process.env.REACT_APP_CLOUDINARY_API_KEY ?? "";
-  apiSecret = process.env.REACT_APP_CLOUDINARY_API_SECRET ?? "";
+  cloudName =
+    (process.env.REACT_APP_CLOUDINARY_CLOUD_NAME || "").trim() ||
+    DEFAULT_CLOUD_NAME;
+  uploadPreset =
+    (process.env.REACT_APP_CLOUDINARY_UPLOAD_PRESET || "").trim() ||
+    DEFAULT_UPLOAD_PRESET;
+  lastError = null;
+
+  isConfigured() {
+    return Boolean(this.cloudName && this.uploadPreset);
+  }
 
   /**
-   * Upload image or video file to Cloudinary.
-   * Automatically detects media type (image/video) using "auto/upload".
+   * Upload an image or video file to Cloudinary.
+   * Returns the secure URL, or null on failure (reason kept in `lastError`).
    */
   async uploadMedia(file, { folder = "cookeaze_uploads" } = {}) {
+    if (!this.isConfigured()) {
+      this.lastError = "Cloudinary is not configured";
+      return null;
+    }
+
     try {
-      const timestamp = Math.floor(Date.now() / 1000);
-
-      // Signature: "folder=<folder>&timestamp=<timestamp><apiSecret>"
-      const paramsToSign = `folder=${folder}&timestamp=${timestamp}${this.apiSecret}`;
-      const signature = sha1(paramsToSign);
-
-      const url = `https://api.cloudinary.com/v1_1/${this.cloudName}/auto/upload`;
-
       const formData = new FormData();
       formData.append("file", file);
-      formData.append("api_key", this.apiKey);
-      formData.append("timestamp", String(timestamp));
-      formData.append("signature", signature);
-      formData.append("folder", folder);
+      formData.append("upload_preset", this.uploadPreset);
+      if (folder) formData.append("folder", folder);
 
-      const res = await fetch(url, { method: "POST", body: formData });
-      const data = await res.json();
+      const res = await fetch(
+        `https://api.cloudinary.com/v1_1/${this.cloudName}/auto/upload`,
+        { method: "POST", body: formData }
+      );
+      const data = await res.json().catch(() => ({}));
 
-      if (res.ok) {
-        const uploadedUrl = data.secure_url;
-        console.log("✅ Cloudinary Upload Success:", uploadedUrl);
-        return uploadedUrl;
+      if (res.ok && data.secure_url) {
+        this.lastError = null;
+        return data.secure_url;
       }
 
-      console.log("❌ Cloudinary Upload Failed:", data);
+      this.lastError =
+        data?.error?.message || `Upload failed (HTTP ${res.status})`;
+      console.error("Cloudinary upload failed:", this.lastError);
       return null;
     } catch (e) {
-      console.log("⚠️ Cloudinary Upload Error:", e);
+      this.lastError = e?.message || "Network error while uploading image";
+      console.error("Cloudinary upload error:", e);
       return null;
     }
   }
 
   /**
-   * Firebase-style method: returns URL or throws
+   * Returns the uploaded URL or throws with Cloudinary's reason.
    */
   async uploadFile(file, { folder = "cookeaze_uploads" } = {}) {
     const url = await this.uploadMedia(file, { folder });
-    if (!url) throw new Error("Cloudinary upload failed.");
+    if (!url) {
+      throw new Error(
+        `Image upload failed: ${this.lastError || "Unknown Cloudinary error"}`
+      );
+    }
     return url;
   }
 }
 
 const cloudinaryService = new CloudinaryService();
 export default cloudinaryService;
-
